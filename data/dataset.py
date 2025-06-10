@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 import torchaudio
 import numpy as np
 from pathlib import Path
@@ -10,6 +10,7 @@ from tqdm import tqdm
 import sys
 from contextlib import contextmanager
 import io
+from collections import defaultdict
 
 # Disable all possible FunASR output
 os.environ["FUNASR_DISABLE_PROGRESS_BAR"] = "1"
@@ -74,6 +75,44 @@ def collate_fn(batch):
         "speaker_id": speaker_ids,
         "dataset": datasets,
     }
+
+
+class SpeakerGroupedSampler(Sampler):
+    """
+    Sampler that groups samples by speaker ID to ensure batches contain samples from the same speaker.
+    This helps with speaker disentanglement during training.
+    """
+
+    def __init__(self, dataset, batch_size):
+        """
+        Args:
+            dataset: The dataset to sample from
+            batch_size: Size of each batch
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+
+        # Group indices by speaker ID
+        self.speaker_groups = defaultdict(list)
+        for idx, item in enumerate(dataset.data):
+            self.speaker_groups[item["speaker_id"]].append(idx)
+
+        # Sort speakers by ID and create batches
+        self.batches = []
+        for speaker_id in sorted(self.speaker_groups.keys()):
+            indices = self.speaker_groups[speaker_id]
+            # Create batches for this speaker, including the last partial batch
+            for i in range(0, len(indices), self.batch_size):
+                batch = indices[i : i + self.batch_size]
+                if len(batch) > 0:  # Only add non-empty batches
+                    self.batches.append(batch)
+
+    def __iter__(self):
+        for batch in self.batches:
+            yield from batch
+
+    def __len__(self):
+        return len(self.dataset)
 
 
 class EmotionDataset(Dataset):
@@ -172,3 +211,15 @@ class EmotionDataset(Dataset):
             "speaker_id": item["speaker_id"],
             "dataset": item["dataset"],
         }
+
+    def get_speaker_sampler(self, batch_size):
+        """
+        Create a sampler that groups samples by speaker ID.
+
+        Args:
+            batch_size: Size of each batch
+
+        Returns:
+            SpeakerGroupedSampler instance
+        """
+        return SpeakerGroupedSampler(self, batch_size)
