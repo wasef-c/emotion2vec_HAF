@@ -1,5 +1,8 @@
+from datasets import load_dataset
+import librosa
+from funasr import AutoModel
 import torch
-from torch.utils.data import Dataset, Sampler
+from torch.utils.data import Dataset, Sampler, Subset
 import torchaudio
 import numpy as np
 from pathlib import Path
@@ -36,11 +39,6 @@ def suppress_output():
     finally:
         sys.stdout = old_stdout
         sys.stderr = old_stderr
-
-
-from funasr import AutoModel
-import librosa
-from datasets import load_dataset
 
 
 def collate_fn(batch):
@@ -108,12 +106,166 @@ class SpeakerGroupedSampler(Sampler):
             indices = self.speaker_groups[speaker_id]
             # Create batches for this speaker, including the last partial batch
             for i in range(0, len(indices), self.batch_size):
-                batch = indices[i : i + self.batch_size]
+                batch = indices[i: i + self.batch_size]
                 if len(batch) > 0:  # Only add non-empty batches
                     self.batches.append(batch)
 
     def __iter__(self):
         for batch in self.batches:
+            yield from batch
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class CurriculumSampler(Sampler):
+    """
+    Sampler that implements curriculum learning by gradually introducing more difficult samples.
+    Samples are ordered by difficulty, and the difficulty threshold increases with epochs.
+    """
+
+    def __init__(self, dataset, batch_size, num_epochs, start_threshold=0.0, end_threshold=1.0):
+        """
+        Args:
+            dataset: The dataset to sample from
+            batch_size: Size of each batch
+            num_epochs: Total number of epochs for training
+            start_threshold: Initial difficulty threshold (0.0 to 1.0)
+            end_threshold: Final difficulty threshold (0.0 to 1.0)
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.num_epochs = num_epochs
+        self.start_threshold = start_threshold
+        self.end_threshold = end_threshold
+        self.current_epoch = 0
+
+        # Get the actual dataset (handle Subset case)
+        self.actual_dataset = dataset.dataset if isinstance(
+            dataset, Subset) else dataset
+
+        # Sort all indices by difficulty
+        self.all_indices = list(range(len(self.actual_dataset)))
+        self.all_difficulties = [
+            self.actual_dataset.data[i]["difficulty"] for i in self.all_indices]
+        sorted_pairs = sorted(
+            zip(self.all_indices, self.all_difficulties), key=lambda x: x[1])
+        self.sorted_indices = [pair[0] for pair in sorted_pairs]
+        self.sorted_difficulties = [pair[1] for pair in sorted_pairs]
+
+    def set_epoch(self, epoch):
+        """Update the current epoch to adjust the difficulty threshold."""
+        self.current_epoch = epoch
+
+    def __iter__(self):
+        # Calculate current difficulty threshold based on epoch
+        progress = min(1.0, self.current_epoch / self.num_epochs)
+        current_threshold = self.start_threshold + \
+            (self.end_threshold - self.start_threshold) * progress
+
+        # Filter indices based on current threshold
+        valid_indices = [
+            idx for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
+            if diff <= current_threshold
+        ]
+
+        # Create batches
+        batches = []
+        for i in range(0, len(valid_indices), self.batch_size):
+            batch = valid_indices[i:i + self.batch_size]
+            if len(batch) > 0:  # Only add non-empty batches
+                batches.append(batch)
+
+        # Shuffle batches
+        np.random.shuffle(batches)
+
+        # Yield indices from batches
+        for batch in batches:
+            yield from batch
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class CombinedSampler(Sampler):
+    """
+    Sampler that combines curriculum learning with speaker grouping.
+    Samples are first filtered by difficulty threshold, then grouped by speaker,
+    and finally batched while maintaining speaker groups.
+    """
+
+    def __init__(self, dataset, batch_size, num_epochs, start_threshold=0.0, end_threshold=1.0):
+        """
+        Args:
+            dataset: The dataset to sample from
+            batch_size: Size of each batch
+            num_epochs: Total number of epochs for training
+            start_threshold: Initial difficulty threshold (0.0 to 1.0)
+            end_threshold: Final difficulty threshold (0.0 to 1.0)
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.num_epochs = num_epochs
+        self.start_threshold = start_threshold
+        self.end_threshold = end_threshold
+        self.current_epoch = 0
+
+        # Get the actual dataset (handle Subset case)
+        self.actual_dataset = dataset.dataset if isinstance(
+            dataset, Subset) else dataset
+
+        # Sort all indices by difficulty
+        self.all_indices = list(range(len(self.actual_dataset)))
+        self.all_difficulties = [
+            self.actual_dataset.data[i]["difficulty"] for i in self.all_indices]
+        sorted_pairs = sorted(
+            zip(self.all_indices, self.all_difficulties), key=lambda x: x[1])
+        self.sorted_indices = [pair[0] for pair in sorted_pairs]
+        self.sorted_difficulties = [pair[1] for pair in sorted_pairs]
+
+        # Group indices by speaker ID
+        self.speaker_groups = defaultdict(list)
+        for idx in self.all_indices:
+            speaker_id = self.actual_dataset.data[idx]["speaker_id"]
+            self.speaker_groups[speaker_id].append(idx)
+
+    def set_epoch(self, epoch):
+        """Update the current epoch to adjust the difficulty threshold."""
+        self.current_epoch = epoch
+
+    def __iter__(self):
+        # Calculate current difficulty threshold based on epoch
+        progress = min(1.0, self.current_epoch / self.num_epochs)
+        current_threshold = self.start_threshold + \
+            (self.end_threshold - self.start_threshold) * progress
+
+        # Filter indices based on current threshold
+        valid_indices = {
+            idx for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
+            if diff <= current_threshold
+        }
+
+        # Create speaker groups with only valid indices
+        valid_speaker_groups = defaultdict(list)
+        for speaker_id, indices in self.speaker_groups.items():
+            valid_speaker_groups[speaker_id] = [
+                idx for idx in indices if idx in valid_indices]
+
+        # Create batches while maintaining speaker groups
+        batches = []
+        for speaker_id in sorted(valid_speaker_groups.keys()):
+            speaker_indices = valid_speaker_groups[speaker_id]
+            # Create batches for this speaker, including the last partial batch
+            for i in range(0, len(speaker_indices), self.batch_size):
+                batch = speaker_indices[i:i + self.batch_size]
+                if len(batch) > 0:  # Only add non-empty batches
+                    batches.append(batch)
+
+        # Shuffle batches
+        np.random.shuffle(batches)
+
+        # Yield indices from batches
+        for batch in batches:
             yield from batch
 
     def __len__(self):

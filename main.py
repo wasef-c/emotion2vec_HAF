@@ -1,3 +1,5 @@
+from data.dataset import EmotionDataset, collate_fn
+from models.hierarchical_attention import HierarchicalAttention
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -26,13 +28,12 @@ os.environ["FUNASR_DISABLE_TQDM"] = "1"
 logging.getLogger("funasr").setLevel(logging.ERROR)
 logging.getLogger("modelscope").setLevel(logging.ERROR)
 logging.getLogger("tqdm").setLevel(logging.ERROR)
-from models.hierarchical_attention import HierarchicalAttention
-from data.dataset import EmotionDataset, collate_fn
 
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 mp.set_start_method("spawn", force=True)
 pretrain_dir = "/home/rml/Documents/pythontest/emotion2vec_HA/pretrain_hierarchical_multitask_20250611_104521/multitask_backbone.pt"
 SD = False
+CURR = True  # Flag for curriculum learning
 experiment_name = "pretrain_N1p1_H2p5_noSD"
 
 
@@ -69,7 +70,8 @@ def calculate_comprehensive_metrics(all_labels, all_preds, class_names=None):
 
     # Advanced metrics
     uar = calculate_uar(cm)
-    wa = calculate_wa(cm)  # This should equal accuracy, but good for verification
+    # This should equal accuracy, but good for verification
+    wa = calculate_wa(cm)
     f1_weighted = f1_score(all_labels, all_preds, average="weighted")
     f1_macro = f1_score(all_labels, all_preds, average="macro")
 
@@ -111,7 +113,8 @@ class SpeakerGroupedSampler(Sampler):
         self.batch_size = batch_size
 
         # Get the actual dataset (handle Subset case)
-        actual_dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
+        actual_dataset = dataset.dataset if isinstance(
+            dataset, Subset) else dataset
 
         # Group indices by speaker ID
         self.speaker_groups = defaultdict(list)
@@ -130,7 +133,7 @@ class SpeakerGroupedSampler(Sampler):
             indices = self.speaker_groups[speaker_id]
             # Create batches for this speaker, including the last partial batch
             for i in range(0, len(indices), self.batch_size):
-                batch = indices[i : i + self.batch_size]
+                batch = indices[i: i + self.batch_size]
                 if len(batch) > 0:  # Only add non-empty batches
                     self.batches.append(batch)
 
@@ -189,17 +192,20 @@ def enhanced_evaluate(
             all_labels.extend(labels.cpu().numpy())
 
             # Collect fusion weights for analysis
-            fusion_weights = attention_info["fusion_weights"].detach().cpu().numpy()
+            fusion_weights = attention_info["fusion_weights"].detach(
+            ).cpu().numpy()
             all_fusion_weights.append(fusion_weights)
 
             # Calculate attention entropy
             frame_attn = attention_info["frame_attn"].detach()
-            entropy = -torch.sum(frame_attn * torch.log(frame_attn + 1e-8), dim=-1)
+            entropy = -torch.sum(frame_attn *
+                                 torch.log(frame_attn + 1e-8), dim=-1)
             attention_entropies.append(entropy.mean().item())
 
     # Calculate comprehensive metrics
     class_names = ["neutral", "happy", "sad", "anger"]
-    metrics = calculate_comprehensive_metrics(all_labels, all_preds, class_names)
+    metrics = calculate_comprehensive_metrics(
+        all_labels, all_preds, class_names)
 
     # Add loss
     metrics["loss"] = total_loss / len(val_loader)
@@ -255,14 +261,16 @@ def enhanced_evaluate(
 
         # Save confusion matrix plot with session info
         cm_path = (
-            save_dir / f"confusion_matrix_{eval_type}{session_str}_epoch_{epoch}.png"
+            save_dir /
+            f"confusion_matrix_{eval_type}{session_str}_epoch_{epoch}.png"
         )
         plot_confusion_matrix(
             np.array(metrics["confusion_matrix"]), class_names, cm_path
         )
 
         # Save comprehensive metrics with session info
-        report_path = save_dir / f"metrics_{eval_type}{session_str}_epoch_{epoch}.json"
+        report_path = save_dir / \
+            f"metrics_{eval_type}{session_str}_epoch_{epoch}.json"
         with open(report_path, "w") as f:
             json.dump(metrics, f, indent=4)
 
@@ -331,7 +339,8 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch):
         all_labels.extend(labels.cpu().numpy())
 
         # Collect fusion weights for analysis
-        fusion_weights = attention_info["fusion_weights"].detach().cpu().numpy()
+        fusion_weights = attention_info["fusion_weights"].detach(
+        ).cpu().numpy()
         all_fusion_weights.append(fusion_weights)
 
         # Calculate attention entropy
@@ -349,7 +358,8 @@ def train_epoch(model, train_loader, criterion, optimizer, device, epoch):
 
     # Calculate comprehensive metrics
     class_names = ["neutral", "happy", "sad", "anger"]
-    metrics = calculate_comprehensive_metrics(all_labels, all_preds, class_names)
+    metrics = calculate_comprehensive_metrics(
+        all_labels, all_preds, class_names)
 
     # Add loss
     metrics["loss"] = total_loss / len(train_loader)
@@ -457,6 +467,10 @@ def main():
             "patience": 5,
             "min_delta": 0.001,  # Minimum change in monitored value to qualify as an improvement
         },
+        "curriculum": {
+            "start_threshold": 0.0,  # Start with easiest samples
+            "end_threshold": 1.0,    # End with all samples
+        } if CURR else None,
     }
 
     # Create directories
@@ -469,7 +483,8 @@ def main():
     results_dir.mkdir(exist_ok=True)
 
     # Initialize wandb
-    wandb.init(project="emotion-recognition-hierarchical", config=config, name=run_name)
+    wandb.init(project="emotion-recognition-hierarchical",
+               config=config, name=run_name)
 
     # Load datasets
     print("Loading datasets...")
@@ -510,8 +525,10 @@ def main():
 
         # Calculate class weights for this split
         class_names = ["neutral", "happy", "sad", "anger"]
-        split_class_weights = calculate_class_weights(train_dataset, class_names)
-        print(f"\nClass distribution for Session {test_session} training split:")
+        split_class_weights = calculate_class_weights(
+            train_dataset, class_names)
+        print(
+            f"\nClass distribution for Session {test_session} training split:")
         for class_name, weight in split_class_weights.items():
             print(f"{class_name}: {weight:.2f}")
 
@@ -536,12 +553,49 @@ def main():
         print("Final class weights (base * split):")
         for class_name, weight in final_class_weights.items():
             print(f"{class_name}: {weight:.2f}")
-        if SD == True:
+        if SD and CURR:
+            # Create combined sampler for both curriculum learning and speaker grouping
+            combined_sampler = CombinedSampler(
+                train_dataset,
+                config["batch_size"],
+                config["num_epochs"],
+                config["curriculum"]["start_threshold"],
+                config["curriculum"]["end_threshold"]
+            )
             train_loader = DataLoader(
                 train_dataset,
                 batch_size=config["batch_size"],
                 shuffle=False,
-                sampler=SpeakerGroupedSampler(train_dataset, config["batch_size"]),
+                sampler=combined_sampler,
+                num_workers=0,
+                pin_memory=True,
+                collate_fn=collate_fn,
+            )
+        elif SD:
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=config["batch_size"],
+                shuffle=False,
+                sampler=SpeakerGroupedSampler(
+                    train_dataset, config["batch_size"]),
+                num_workers=0,
+                pin_memory=True,
+                collate_fn=collate_fn,
+            )
+        elif CURR:
+            # Create curriculum sampler
+            curriculum_sampler = CurriculumSampler(
+                train_dataset,
+                config["batch_size"],
+                config["num_epochs"],
+                config["curriculum"]["start_threshold"],
+                config["curriculum"]["end_threshold"]
+            )
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=config["batch_size"],
+                shuffle=False,
+                sampler=curriculum_sampler,
                 num_workers=0,
                 pin_memory=True,
                 collate_fn=collate_fn,
@@ -566,7 +620,8 @@ def main():
         )
 
         # Initialize model
-        model = HierarchicalAttention(input_dim=768).to(config["device"]).float()
+        model = HierarchicalAttention(
+            input_dim=768).to(config["device"]).float()
         if pretrain_dir != None:
             # Load the backbone state dict
             checkpoint = torch.load(pretrain_dir)
@@ -599,6 +654,10 @@ def main():
         best_model_state = None
 
         for epoch in range(config["num_epochs"]):
+            # Update curriculum sampler epoch if using curriculum learning
+            if CURR:
+                train_loader.sampler.set_epoch(epoch)
+
             # Train
             train_metrics = train_epoch(
                 model, train_loader, criterion, optimizer, config["device"], epoch
@@ -646,7 +705,8 @@ def main():
             else:
                 patience_counter += 1
                 if patience_counter >= config["early_stopping"]["patience"]:
-                    print(f"\nEarly stopping triggered after {epoch + 1} epochs")
+                    print(
+                        f"\nEarly stopping triggered after {epoch + 1} epochs")
                     print(f"Best validation WA: {best_val_wa_so_far:.4f}")
                     break
 
@@ -677,7 +737,8 @@ def main():
         print(f"\nLoading best model for Session {test_session}...")
         if best_model_state is None:
             # If no model was saved during training (shouldn't happen), load the last saved one
-            checkpoint = torch.load(save_dir / f"best_model_session_{test_session}.pt")
+            checkpoint = torch.load(
+                save_dir / f"best_model_session_{test_session}.pt")
         else:
             checkpoint = best_model_state
 
@@ -693,7 +754,8 @@ def main():
         cross_corpus_dir.mkdir(exist_ok=True)
 
         # Final evaluation on held-out test set
-        print(f"\nPerforming final evaluation on held-out Session {test_session}...")
+        print(
+            f"\nPerforming final evaluation on held-out Session {test_session}...")
         final_metrics = enhanced_evaluate(
             model,
             test_loader,
@@ -781,7 +843,8 @@ def main():
         held_out_dir = session_dir / "held_out_evaluation"
         with open(held_out_dir / "results.json", "r") as f:
             session_results = json.load(f)
-            avg_confusion_matrix += np.array(session_results["confusion_matrix"])
+            avg_confusion_matrix += np.array(
+                session_results["confusion_matrix"])
     avg_confusion_matrix /= len(all_results)
 
     # Save averaged confusion matrix
@@ -798,7 +861,8 @@ def main():
     print(
         f"F1-Weighted: {np.mean(all_f1s_weighted):.4f} ± {np.std(all_f1s_weighted):.4f}"
     )
-    print(f"F1-Macro: {np.mean(all_f1s_macro):.4f} ± {np.std(all_f1s_macro):.4f}")
+    print(
+        f"F1-Macro: {np.mean(all_f1s_macro):.4f} ± {np.std(all_f1s_macro):.4f}")
 
     # Calculate averaged class accuracies
     avg_class_accuracies = {}
@@ -935,7 +999,8 @@ def main():
 
         # Validate on a small portion of IEMOCAP for early stopping
         val_size = int(len(iemocap_train) * 0.1)  # Use 10% for validation
-        val_indices = np.random.choice(len(iemocap_train), val_size, replace=False)
+        val_indices = np.random.choice(
+            len(iemocap_train), val_size, replace=False)
         val_dataset = Subset(iemocap_train, val_indices)
         val_loader = DataLoader(
             val_dataset,
@@ -1151,10 +1216,12 @@ def main():
                 },
                 "f1_weighted": {
                     "mean": float(
-                        np.mean([r["f1_weighted"] for r in cross_corpus_results])
+                        np.mean([r["f1_weighted"]
+                                for r in cross_corpus_results])
                     ),
                     "std": float(
-                        np.std([r["f1_weighted"] for r in cross_corpus_results])
+                        np.std([r["f1_weighted"]
+                               for r in cross_corpus_results])
                     ),
                 },
                 "f1_macro": {
