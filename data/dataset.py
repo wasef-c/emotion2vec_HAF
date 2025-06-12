@@ -57,6 +57,7 @@ def collate_fn(batch):
     labels = torch.zeros(batch_size, dtype=torch.long)
     speaker_ids = []
     datasets = []
+    difficulties = []
 
     # Fill tensors with actual data
     for i, item in enumerate(batch):
@@ -68,12 +69,16 @@ def collate_fn(batch):
         labels[i] = item["label"]
         speaker_ids.append(item["speaker_id"])
         datasets.append(item["dataset"])
+        difficulties.append(
+            item.get("difficulty", 0.0)
+        )  # Default to 0.0 if not present
 
     return {
         "features": features,
         "label": labels,
         "speaker_id": speaker_ids,
         "dataset": datasets,
+        "difficulty": torch.tensor(difficulties, dtype=torch.float32),
     }
 
 
@@ -141,9 +146,11 @@ class EmotionDataset(Dataset):
 
         # Load dataset from HuggingFace
         if dataset_name.upper() == "IEMOCAP":
-            self.dataset = load_dataset("cairocode/IEMO_WAV_002", split=split)
+            self.dataset = load_dataset("cairocode/IEMO_WAV_Diff", split=split)
         elif dataset_name.upper() == "MSP-IMPROV":
             self.dataset = load_dataset("cairocode/MSPI_WAV", split=split)
+        elif dataset_name.upper() == "MSP-PODCAST":
+            self.dataset = load_dataset("cairocode/MSPP_WAV_speaker_split")
         else:
             raise ValueError(
                 f"Dataset {dataset_name} not supported. Use either 'IEMOCAP' or 'MSP-IMPROV'"
@@ -170,6 +177,9 @@ class EmotionDataset(Dataset):
                         "label": item["label"],
                         "speaker_id": item["speakerID"],
                         "dataset": dataset_name.upper(),
+                        "difficulty": item[
+                            "difficulty"
+                        ],  # Use existing difficulty column
                     }
                 )
 
@@ -210,6 +220,7 @@ class EmotionDataset(Dataset):
             "label": torch.tensor(item["label"], dtype=torch.long),
             "speaker_id": item["speaker_id"],
             "dataset": item["dataset"],
+            "difficulty": item["difficulty"],
         }
 
     def get_speaker_sampler(self, batch_size):

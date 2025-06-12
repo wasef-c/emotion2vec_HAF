@@ -26,12 +26,14 @@ os.environ["FUNASR_DISABLE_TQDM"] = "1"
 logging.getLogger("funasr").setLevel(logging.ERROR)
 logging.getLogger("modelscope").setLevel(logging.ERROR)
 logging.getLogger("tqdm").setLevel(logging.ERROR)
-SD = True
 from models.hierarchical_attention import HierarchicalAttention
 from data.dataset import EmotionDataset, collate_fn
 
 # Set multiprocessing start method to 'spawn' for CUDA compatibility
 mp.set_start_method("spawn", force=True)
+pretrain_dir = "/home/rml/Documents/pythontest/emotion2vec_HA/pretrain_hierarchical_multitask_20250611_104521/multitask_backbone.pt"
+SD = False
+experiment_name = "pretrain_N1p1_H2p5_noSD"
 
 
 def calculate_uar(cm):
@@ -43,16 +45,15 @@ def calculate_uar(cm):
 def calculate_wa(cm):
     """
     Calculate Weighted Accuracy (WA) from confusion matrix.
-    WA = sum(correct_predictions) / total_samples
-    This is the same as regular accuracy, but explicitly shows the weighting.
+    WA = sum over classes of (support_i * recall_i) / total_samples
     """
-    # Get total correct predictions (diagonal of confusion matrix)
-    correct_predictions = np.sum(cm.diagonal())
-    # Get total samples
-    total_samples = np.sum(cm)
-    # Calculate weighted accuracy
-    wa = correct_predictions / total_samples
-    return wa
+    # support (number of true samples per class) is the sum over rows
+    support = cm.sum(axis=1)
+    # recall per class: TP / (TP + FN)
+    recall_per_class = np.diag(cm) / support
+    # weighted sum of recalls
+    weighted_accuracy = np.sum(recall_per_class * support) / np.sum(cm)
+    return weighted_accuracy
 
 
 def calculate_comprehensive_metrics(all_labels, all_preds, class_names=None):
@@ -459,7 +460,6 @@ def main():
     }
 
     # Create directories
-    experiment_name = "classweights_N1p1_H2p5_SD"
     save_dir = get_unique_save_dir(experiment_name)
     run_name = os.path.basename(experiment_name)
 
@@ -567,6 +567,14 @@ def main():
 
         # Initialize model
         model = HierarchicalAttention(input_dim=768).to(config["device"]).float()
+        if pretrain_dir != None:
+            # Load the backbone state dict
+            checkpoint = torch.load(pretrain_dir)
+
+            # Load the backbone weights directly since we saved only the backbone
+            model.load_state_dict(checkpoint, strict=False)
+
+            print(f"Loaded pretrained backbone from {pretrain_dir}")
 
         criterion = nn.CrossEntropyLoss(weight=class_weights)
         optimizer = optim.AdamW(
