@@ -106,7 +106,7 @@ class SpeakerGroupedSampler(Sampler):
             indices = self.speaker_groups[speaker_id]
             # Create batches for this speaker, including the last partial batch
             for i in range(0, len(indices), self.batch_size):
-                batch = indices[i: i + self.batch_size]
+                batch = indices[i : i + self.batch_size]
                 if len(batch) > 0:  # Only add non-empty batches
                     self.batches.append(batch)
 
@@ -124,7 +124,9 @@ class CurriculumSampler(Sampler):
     Samples are ordered by difficulty, and the difficulty threshold increases with epochs.
     """
 
-    def __init__(self, dataset, batch_size, num_epochs, start_threshold=0.0, end_threshold=1.0):
+    def __init__(
+        self, dataset, batch_size, num_epochs, start_threshold=0.0, end_threshold=1.0, curriculum_epochs=20
+    ):
         """
         Args:
             dataset: The dataset to sample from
@@ -139,17 +141,33 @@ class CurriculumSampler(Sampler):
         self.start_threshold = start_threshold
         self.end_threshold = end_threshold
         self.current_epoch = 0
+        self.curriculum_epochs = curriculum_epochs  # Number of epochs to reach full dataset
 
         # Get the actual dataset (handle Subset case)
-        self.actual_dataset = dataset.dataset if isinstance(
-            dataset, Subset) else dataset
+        self.actual_dataset = (
+            dataset.dataset if isinstance(dataset, Subset) else dataset
+        )
+        self.is_subset = isinstance(dataset, Subset)
 
-        # Sort all indices by difficulty
-        self.all_indices = list(range(len(self.actual_dataset)))
+        # Get all indices and shuffle them first
+        if self.is_subset:
+            # For Subset, we need to map between subset indices and original indices
+            self.original_to_subset = {
+                orig_idx: subset_idx
+                for subset_idx, orig_idx in enumerate(dataset.indices)
+            }
+            self.all_indices = dataset.indices.copy()
+        else:
+            self.all_indices = list(range(len(self.actual_dataset)))
+        np.random.shuffle(self.all_indices)
+
+        # Then get difficulties and sort
         self.all_difficulties = [
-            self.actual_dataset.data[i]["difficulty"] for i in self.all_indices]
+            self.actual_dataset.data[i]["difficulty"] for i in self.all_indices
+        ]
         sorted_pairs = sorted(
-            zip(self.all_indices, self.all_difficulties), key=lambda x: x[1])
+            zip(self.all_indices, self.all_difficulties), key=lambda x: x[1]
+        )
         self.sorted_indices = [pair[0] for pair in sorted_pairs]
         self.sorted_difficulties = [pair[1] for pair in sorted_pairs]
 
@@ -159,21 +177,34 @@ class CurriculumSampler(Sampler):
 
     def __iter__(self):
         # Calculate current difficulty threshold based on epoch
-        progress = min(1.0, self.current_epoch / self.num_epochs)
-        current_threshold = self.start_threshold + \
-            (self.end_threshold - self.start_threshold) * progress
+        progress = min(1.0, self.current_epoch / self.curriculum_epochs)
 
-        # Filter indices based on current threshold
-        valid_indices = [
-            idx for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
-            if diff <= current_threshold
-        ]
+        # If we're past curriculum_epochs, use all data
+        if self.current_epoch >= self.curriculum_epochs:
+            valid_indices = self.all_indices.copy()
+        else:
+            current_threshold = (
+                self.start_threshold
+                + (self.end_threshold - self.start_threshold) * progress
+            )
+            # Filter indices based on current threshold
+            valid_indices = [
+                idx
+                for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
+                if diff <= current_threshold
+            ]
+
+        # Shuffle valid indices
+        np.random.shuffle(valid_indices)
 
         # Create batches
         batches = []
         for i in range(0, len(valid_indices), self.batch_size):
-            batch = valid_indices[i:i + self.batch_size]
+            batch = valid_indices[i : i + self.batch_size]
             if len(batch) > 0:  # Only add non-empty batches
+                if self.is_subset:
+                    # Convert original indices to subset indices
+                    batch = [self.original_to_subset[idx] for idx in batch]
                 batches.append(batch)
 
         # Shuffle batches
@@ -184,7 +215,22 @@ class CurriculumSampler(Sampler):
             yield from batch
 
     def __len__(self):
-        return len(self.dataset)
+        # Calculate current difficulty threshold based on epoch
+        progress = min(1.0, self.current_epoch / self.curriculum_epochs)
+
+        # If we're past curriculum_epochs, use all data
+        if self.current_epoch >= self.curriculum_epochs:
+            return len(self.dataset)
+
+        current_threshold = (
+            self.start_threshold
+            + (self.end_threshold - self.start_threshold) * progress
+        )
+        # Count valid indices based on current threshold
+        valid_count = sum(
+            1 for diff in self.sorted_difficulties if diff <= current_threshold
+        )
+        return valid_count
 
 
 class CombinedSampler(Sampler):
@@ -194,7 +240,9 @@ class CombinedSampler(Sampler):
     and finally batched while maintaining speaker groups.
     """
 
-    def __init__(self, dataset, batch_size, num_epochs, start_threshold=0.0, end_threshold=1.0):
+    def __init__(
+        self, dataset, batch_size, num_epochs, start_threshold=0.0, end_threshold=1.0, curriculum_epochs=20
+    ):
         """
         Args:
             dataset: The dataset to sample from
@@ -209,17 +257,33 @@ class CombinedSampler(Sampler):
         self.start_threshold = start_threshold
         self.end_threshold = end_threshold
         self.current_epoch = 0
+        self.curriculum_epochs = curriculum_epochs  # Number of epochs to reach full dataset
 
         # Get the actual dataset (handle Subset case)
-        self.actual_dataset = dataset.dataset if isinstance(
-            dataset, Subset) else dataset
+        self.actual_dataset = (
+            dataset.dataset if isinstance(dataset, Subset) else dataset
+        )
+        self.is_subset = isinstance(dataset, Subset)
 
-        # Sort all indices by difficulty
-        self.all_indices = list(range(len(self.actual_dataset)))
+        # Get all indices and shuffle them first
+        if self.is_subset:
+            # For Subset, we need to map between subset indices and original indices
+            self.original_to_subset = {
+                orig_idx: subset_idx
+                for subset_idx, orig_idx in enumerate(dataset.indices)
+            }
+            self.all_indices = dataset.indices.copy()
+        else:
+            self.all_indices = list(range(len(self.actual_dataset)))
+        np.random.shuffle(self.all_indices)
+
+        # Then get difficulties and sort
         self.all_difficulties = [
-            self.actual_dataset.data[i]["difficulty"] for i in self.all_indices]
+            self.actual_dataset.data[i]["difficulty"] for i in self.all_indices
+        ]
         sorted_pairs = sorted(
-            zip(self.all_indices, self.all_difficulties), key=lambda x: x[1])
+            zip(self.all_indices, self.all_difficulties), key=lambda x: x[1]
+        )
         self.sorted_indices = [pair[0] for pair in sorted_pairs]
         self.sorted_difficulties = [pair[1] for pair in sorted_pairs]
 
@@ -235,21 +299,29 @@ class CombinedSampler(Sampler):
 
     def __iter__(self):
         # Calculate current difficulty threshold based on epoch
-        progress = min(1.0, self.current_epoch / self.num_epochs)
-        current_threshold = self.start_threshold + \
-            (self.end_threshold - self.start_threshold) * progress
+        progress = min(1.0, self.current_epoch / self.curriculum_epochs)
 
-        # Filter indices based on current threshold
-        valid_indices = {
-            idx for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
-            if diff <= current_threshold
-        }
+        # If we're past curriculum_epochs, use all data
+        if self.current_epoch >= self.curriculum_epochs:
+            valid_indices = set(self.all_indices)
+        else:
+            current_threshold = (
+                self.start_threshold
+                + (self.end_threshold - self.start_threshold) * progress
+            )
+            # Filter indices based on current threshold
+            valid_indices = {
+                idx
+                for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
+                if diff <= current_threshold
+            }
 
         # Create speaker groups with only valid indices
         valid_speaker_groups = defaultdict(list)
         for speaker_id, indices in self.speaker_groups.items():
             valid_speaker_groups[speaker_id] = [
-                idx for idx in indices if idx in valid_indices]
+                idx for idx in indices if idx in valid_indices
+            ]
 
         # Create batches while maintaining speaker groups
         batches = []
@@ -257,8 +329,11 @@ class CombinedSampler(Sampler):
             speaker_indices = valid_speaker_groups[speaker_id]
             # Create batches for this speaker, including the last partial batch
             for i in range(0, len(speaker_indices), self.batch_size):
-                batch = speaker_indices[i:i + self.batch_size]
+                batch = speaker_indices[i : i + self.batch_size]
                 if len(batch) > 0:  # Only add non-empty batches
+                    if self.is_subset:
+                        # Convert original indices to subset indices
+                        batch = [self.original_to_subset[idx] for idx in batch]
                     batches.append(batch)
 
         # Shuffle batches
@@ -269,7 +344,22 @@ class CombinedSampler(Sampler):
             yield from batch
 
     def __len__(self):
-        return len(self.dataset)
+        # Calculate current difficulty threshold based on epoch
+        progress = min(1.0, self.current_epoch / self.curriculum_epochs)
+
+        # If we're past curriculum_epochs, use all data
+        if self.current_epoch >= self.curriculum_epochs:
+            return len(self.dataset)
+
+        current_threshold = (
+            self.start_threshold
+            + (self.end_threshold - self.start_threshold) * progress
+        )
+        # Count valid indices based on current threshold
+        valid_count = sum(
+            1 for diff in self.sorted_difficulties if diff <= current_threshold
+        )
+        return valid_count
 
 
 class EmotionDataset(Dataset):
@@ -298,9 +388,9 @@ class EmotionDataset(Dataset):
 
         # Load dataset from HuggingFace
         if dataset_name.upper() == "IEMOCAP":
-            self.dataset = load_dataset("cairocode/IEMO_WAV_Diff", split=split)
+            self.dataset = load_dataset("cairocode/IEMO_WAV_Diff_2", split=split)
         elif dataset_name.upper() == "MSP-IMPROV":
-            self.dataset = load_dataset("cairocode/MSPI_WAV", split=split)
+            self.dataset = load_dataset("cairocode/MSPI_WAV_Diff", split=split)
         elif dataset_name.upper() == "MSP-PODCAST":
             self.dataset = load_dataset("cairocode/MSPP_WAV_speaker_split")
         else:
