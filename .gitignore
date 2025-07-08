@@ -1,7 +1,87 @@
+# Experiment results and outputs
+experiments/
+*_20*/**  # Timestamped experiment directories
+*.json
+*.csv
+*.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Dataset files and large data
+*.wav
+*.mp3
+*.flac
+data/
+datasets/
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Model checkpoints and weights
+*.pth
+*.pt
+*.ckpt
+models/*.pth
 checkpoints/
+
+# Wandb logs
 wandb/
+.wandb/
 
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
+# Temporary files
+tmp/
+temp/
+*.tmp
 
+# Archive folder (commented experiments)
+archive/
 
+# Large feature files
+*_features_*
+*.npy
+*.npz
+
+# Analysis outputs
+*.png
+*.jpg
+*.pdf
+plots/
+figures/
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+logs/

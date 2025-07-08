@@ -1,0 +1,328 @@
+# Comprehensive Ablation Study - Now that reproducibility is fixed
+# Testing: Curriculum Learning (None/Original/Preset) × Speaker Disentanglement × Class Weights
+
+study_name: "emotion2vec_simple_ablation"
+wandb_project: "emotion2vec_simple_ablation"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  learning_rate: 3e-4
+  weight_decay: 1e-4
+  lr_scheduler: "cosine"
+  
+  # Curriculum learning settings (when enabled)
+  curriculum_epochs: 15
+  curriculum_pacing: "exponential"
+  
+  # Other settings
+  single_test_session: 5  # For faster testing, change to null for full LOSO
+
+# Experiment definitions - 3×2×2 = 12 experiments total
+experiments:
+  # ========================================
+  # NO CURRICULUM LEARNING EXPERIMENTS
+  # ========================================
+  
+  # # Pure baseline
+  # - id: "baseline"
+  #   name: "Baseline"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: false
+  #   use_speaker_disentanglement: false
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 1.0
+  #     sad: 1.0
+  #     anger: 1.0
+  #   description: "Pure baseline"
+  #   category: "baseline"
+
+  # # Class weights only
+  # - id: "weights_only"
+  #   name: "Weights Only"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: false
+  #   use_speaker_disentanglement: false
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 2.5
+  #     sad: 1.5
+  #     anger: 1.5
+  #   description: "Class weights only"
+  #   category: "weights"
+
+  # # Speaker disentanglement only
+  # - id: "speaker_only"
+  #   name: "Speaker Only"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: false
+  #   use_speaker_disentanglement: true
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 1.0
+  #     sad: 1.0
+  #     anger: 1.0
+  #   description: "Speaker disentanglement only"
+  #   category: "speaker"
+
+  # # Speaker + Class Weights
+  # - id: "speaker_weights"
+  #   name: "Speaker + Weights"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: false
+  #   use_speaker_disentanglement: true
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 2.5
+  #     sad: 1.5
+  #     anger: 1.5
+  #   description: "Baseline with speaker disentanglement and class weights"
+  #   category: "no_curriculum"
+
+  # # ========================================
+  # # ORIGINAL CURRICULUM LEARNING EXPERIMENTS
+  # # ========================================
+  
+  # # Original curriculum only
+  # - id: "curriculum_original"
+  #   name: "Curriculum (Original)"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: false
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 1.0
+  #     sad: 1.0
+  #     anger: 1.0
+  #   description: "Original curriculum learning only"
+  #   category: "original_curriculum"
+
+  # # Original curriculum + weights
+  # - id: "curriculum_original_weights"
+  #   name: "Curriculum (Original) + Weights"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: false
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 2.5
+  #     sad: 1.5
+  #     anger: 1.5
+  #   description: "Original curriculum with class weights"
+  #   category: "original_curriculum"
+
+  # # Original curriculum + speaker
+  # - id: "curriculum_original_speaker"
+  #   name: "Curriculum (Original) + Speaker"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 1.0
+  #     sad: 1.0
+  #     anger: 1.0
+  #   description: "Original curriculum with speaker disentanglement"
+  #   category: "original_curriculum"
+
+  # # Original curriculum + everything
+  # - id: "curriculum_original_full"
+  #   name: "Curriculum (Original) + Speaker + Weights"
+  #   difficulty_method: "original"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 2.5
+  #     sad: 1.5
+  #     anger: 1.5
+  #   description: "Original curriculum with all enhancements"
+  #   category: "original_curriculum"
+
+  # # ========================================
+  # # PRESET CURRICULUM LEARNING EXPERIMENTS
+  # # ========================================
+  
+  # # Preset curriculum only
+  # - id: "curriculum_preset"
+  #   name: "Curriculum (Preset)"
+  #   difficulty_method: "preset"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: false
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 1.0
+  #     sad: 1.0
+  #     anger: 1.0
+  #   description: "Preset curriculum learning only"
+  #   category: "preset_curriculum"
+
+  # # Preset curriculum + weights
+  # - id: "curriculum_preset_weights"
+  #   name: "Curriculum (Preset) + Weights"
+  #   difficulty_method: "preset"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: false
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 2.5
+  #     sad: 1.5
+  #     anger: 1.5
+  #   description: "Preset curriculum with class weights"
+  #   category: "preset_curriculum"
+
+  # # Preset curriculum + speaker
+  # - id: "curriculum_preset_speaker"
+  #   name: "Curriculum (Preset) + Speaker"
+  #   difficulty_method: "preset"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 1.0
+  #     sad: 1.0
+  #     anger: 1.0
+  #   description: "Preset curriculum with speaker disentanglement"
+  #   category: "preset_curriculum"
+
+  # # Preset curriculum + everything
+  # - id: "curriculum_preset_full"
+  #   name: "Curriculum (Preset) + Speaker + Weights"
+  #   difficulty_method: "preset"
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
+  #   class_weights:
+  #     neutral: 1.0
+  #     happy: 2.5
+  #     sad: 1.5
+  #     anger: 1.5
+  #   description: "Preset curriculum with all enhancements"
+  #   category: "preset_curriculum"
+
+  # ========================================
+  # VAD-BASED CURRICULUM EXPERIMENTS
+  # ========================================
+  
+  # VAD Valence-heavy curriculum
+  - id: "curriculum_vad_valence"
+    name: "Curriculum (VAD Valence)"
+    difficulty_method: "weighted_vad_valence"
+    vad_weights: [0.5, 0.4, 0.1]
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+    description: "VAD-based curriculum with valence emphasis"
+    category: "vad_curriculum"
+
+  # VAD Valence + Speaker + Weights (best performing combo)
+  - id: "curriculum_vad_valence_full"
+    name: "Curriculum (VAD Valence) + Speaker + Weights"
+    difficulty_method: "weighted_vad_valence"
+    vad_weights: [0.5, 0.4, 0.1]
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+    description: "VAD valence curriculum with all enhancements"
+    category: "vad_curriculum"
+
+  # VAD Balanced curriculum
+  - id: "curriculum_vad_balanced"
+    name: "Curriculum (VAD Balanced)"
+    difficulty_method: "weighted_vad_balanced"
+    vad_weights: [0.4, 0.4, 0.2]
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+    description: "VAD-based curriculum with balanced weighting"
+    category: "vad_curriculum"
+
+  # VAD Arousal-heavy curriculum
+  - id: "curriculum_vad_arousal"
+    name: "Curriculum (VAD Arousal)"
+    difficulty_method: "weighted_vad_arousal"
+    vad_weights: [0.4, 0.5, 0.1]
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+    description: "VAD-based curriculum with arousal emphasis"
+    category: "vad_curriculum"
+
+  # Statistical correlation methods
+  - id: "curriculum_pearson"
+    name: "Curriculum (Pearson)"
+    difficulty_method: "pearson_correlation"
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+    description: "Curriculum using Pearson correlation difficulty"
+    category: "statistical_curriculum"
+
+  - id: "curriculum_euclidean"
+    name: "Curriculum (Euclidean)"
+    difficulty_method: "euclidean_distance"
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+    description: "Curriculum using Euclidean distance difficulty"
+    category: "statistical_curriculum"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_uar"
+  secondary_metrics:
+    - "iemocap_wa"
+    - "cross_corpus_uar"
+  
+  # Questions to answer:
+  research_questions:
+    - "Does curriculum learning improve performance?"
+    - "Which curriculum method (original vs preset) works better?"
+    - "Does speaker disentanglement help?"
+    - "Do class weights improve imbalanced classification?"
+    - "What's the best combination of techniques?"
+    - "Are there interaction effects between techniques?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 18  # Updated count
+  minutes_per_experiment: 42  # With single session
+  total_hours: 12.6
+
+# Expected results for comparison (from previous runs)
+expected_results:
+  baseline_range:
+    iemocap_uar: [0.50, 0.55]
+    cross_corpus_uar: [0.40, 0.45]
+  
+  with_enhancements:
+    iemocap_uar: [0.65, 0.70]  # Previous best was ~67.4%
+    cross_corpus_uar: [0.45, 0.50]  # Previous best was ~45.2%
+
+    

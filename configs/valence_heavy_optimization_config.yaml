@@ -1,0 +1,296 @@
+# Valence-Heavy Baseline Optimization Study
+# Deep dive into optimizing the promising Valence-Heavy + ReduceLROnPlateau method
+
+study_name: "valence_heavy_optimization"
+wandb_project: "emotion2vec_valence_heavy_opt"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  learning_rate: 3e-4
+  weight_decay: 1e-4
+  lr_scheduler: "plateau"  # Use ReduceLROnPlateau (best performer)
+  
+  # Difficulty method
+  difficulty_method: "baseline_quadratic"
+  
+  # Curriculum learning
+  use_curriculum_learning: true
+  curriculum_epochs: 15
+  curriculum_pacing: "exponential"
+  
+  # Other settings
+  use_speaker_disentanglement: false
+  single_test_session: 5
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # 1. VAD WEIGHTS OPTIMIZATION
+  # ========================================
+  
+  # Current best: [0.6, 0.25, 0.15]
+  - id: "valence_heavy_current"
+    name: "Current Best - [0.6, 0.25, 0.15]"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Current valence-heavy baseline (reference)"
+    category: "vad_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # More extreme valence focus
+  - id: "valence_extreme"
+    name: "Extreme Valence - [0.7, 0.2, 0.1]"
+    vad_weights: [0.7, 0.2, 0.1]
+    description: "Even stronger valence focus"
+    category: "vad_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_ultra"
+    name: "Ultra Valence - [0.8, 0.15, 0.05]"
+    vad_weights: [0.8, 0.15, 0.05]
+    description: "Maximum valence focus"
+    category: "vad_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Balanced arousal versions
+  - id: "valence_arousal_balanced"
+    name: "Valence-Arousal Balanced - [0.55, 0.35, 0.1]"
+    vad_weights: [0.55, 0.35, 0.1]
+    description: "Strong valence with more arousal"
+    category: "vad_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # ========================================
+  # 2. CLASS WEIGHTS OPTIMIZATION
+  # ========================================
+  
+  # Current best with extreme class boosting
+  - id: "valence_heavy_extreme_classes"
+    name: "Extreme Class Boost - [1.0, 3.5, 2.0, 2.0]"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with extreme minority boosting"
+    category: "class_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 3.5
+      sad: 2.0
+      anger: 2.0
+
+  - id: "valence_heavy_happy_focus"
+    name: "Happy Focus - [1.0, 4.0, 1.5, 1.5]"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with extreme happy boosting"
+    category: "class_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 4.0
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_progressive_boost"
+    name: "Progressive Boost - [1.0, 3.0, 2.5, 2.5]"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with progressive minority boosting"
+    category: "class_weights"
+    class_weights:
+      neutral: 1.0
+      happy: 3.0
+      sad: 2.5
+      anger: 2.5
+
+  # ========================================
+  # 3. CURRICULUM VARIATIONS
+  # ========================================
+  
+  # Different curriculum epochs
+  - id: "valence_heavy_long_curriculum"
+    name: "Long Curriculum - 20 epochs"
+    vad_weights: [0.6, 0.25, 0.15]
+    curriculum_epochs: 20
+    description: "Valence-heavy with extended curriculum"
+    category: "curriculum"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_short_curriculum"
+    name: "Short Curriculum - 10 epochs"
+    vad_weights: [0.6, 0.25, 0.15]
+    curriculum_epochs: 10
+    description: "Valence-heavy with shorter curriculum"
+    category: "curriculum"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Different pacing strategies
+  - id: "valence_heavy_linear_pacing"
+    name: "Linear Pacing"
+    vad_weights: [0.6, 0.25, 0.15]
+    curriculum_pacing: "linear"
+    description: "Valence-heavy with linear curriculum pacing"
+    category: "curriculum"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_logarithmic_pacing"
+    name: "Logarithmic Pacing"
+    vad_weights: [0.6, 0.25, 0.15]
+    curriculum_pacing: "logarithmic"
+    description: "Valence-heavy with logarithmic curriculum pacing"
+    category: "curriculum"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # ========================================
+  # 4. TRAINING HYPERPARAMETERS
+  # ========================================
+  
+  # Different weight decay
+  - id: "valence_heavy_high_wd"
+    name: "High Weight Decay - 5e-4"
+    vad_weights: [0.6, 0.25, 0.15]
+    weight_decay: 5e-4
+    description: "Valence-heavy with higher regularization"
+    category: "hyperparams"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_low_wd"
+    name: "Low Weight Decay - 5e-5"
+    vad_weights: [0.6, 0.25, 0.15]
+    weight_decay: 5e-5
+    description: "Valence-heavy with lower regularization"
+    category: "hyperparams"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Different batch sizes
+  - id: "valence_heavy_large_batch"
+    name: "Large Batch - 32"
+    vad_weights: [0.6, 0.25, 0.15]
+    batch_size: 32
+    description: "Valence-heavy with larger batch size"
+    category: "hyperparams"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_small_batch"
+    name: "Small Batch - 16"
+    vad_weights: [0.6, 0.25, 0.15]
+    batch_size: 16
+    description: "Valence-heavy with smaller batch size"
+    category: "hyperparams"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # ========================================
+  # 5. BEST COMBINATIONS + SPEAKER
+  # ========================================
+  
+  # Test top configurations with speaker disentanglement
+  - id: "valence_extreme_speaker"
+    name: "Extreme Valence + Speaker"
+    vad_weights: [0.7, 0.2, 0.1]
+    use_speaker_disentanglement: true
+    description: "Extreme valence focus with speaker"
+    category: "speaker_combinations"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_extreme_classes_speaker"
+    name: "Extreme Classes + Speaker"
+    vad_weights: [0.6, 0.25, 0.15]
+    use_speaker_disentanglement: true
+    description: "Current VAD with extreme class boost + speaker"
+    category: "speaker_combinations"
+    class_weights:
+      neutral: 1.0
+      happy: 3.5
+      sad: 2.0
+      anger: 2.0
+
+  - id: "valence_long_curriculum_speaker"
+    name: "Long Curriculum + Speaker"
+    vad_weights: [0.6, 0.25, 0.15]
+    curriculum_epochs: 20
+    use_speaker_disentanglement: true
+    description: "Extended curriculum with speaker"
+    category: "speaker_combinations"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+# Expected results for comparison
+expected_results:
+  valence_heavy_current:
+    iemocap_wa: 0.6497
+    description: "Without speaker baseline"
+    
+  valence_heavy_speaker_reference:
+    iemocap_wa: 0.7006
+    description: "With speaker reference"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  # Performance thresholds
+  thresholds:
+    excellent_wa: 0.71    # Above current best
+    good_wa: 0.68         # Above current without speaker
+    target_wa: 0.72       # Stretch goal
+
+# Estimated runtime
+estimated_runtime:
+  total_experiments: 19
+  minutes_per_experiment: 42
+  total_hours: 13.3

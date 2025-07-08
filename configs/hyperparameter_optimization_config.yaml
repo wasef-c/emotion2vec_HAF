@@ -1,0 +1,471 @@
+# Hyperparameter Optimization for Top 3 Methods
+# Testing class weights, learning rates, and pacing strategies
+
+study_name: "hyperparameter_optimization"
+wandb_project: "emotion2vec_hyperparam_opt"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  learning_rate: 3e-4
+  weight_decay: 1e-4
+  lr_scheduler: null  # Default: no scheduler
+  
+  # Curriculum learning (will be overridden per experiment)
+  use_curriculum_learning: true
+  curriculum_epochs: 15
+  
+  # Other settings
+  use_speaker_disentanglement: false
+  single_test_session: 5  # Test only on session 5 for speed
+
+# Experiment definitions - Testing all combinations
+experiments:
+  # ========================================
+  # 1. ORIGINAL DIFFICULTY BASELINE
+  # ========================================
+  
+  # Class Weight Variations
+  - id: "original_cw_default"
+    name: "Original - Default Weights"
+    difficulty_method: "original"
+    description: "Original with default class weights"
+    category: "original_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "original_cw_balanced"
+    name: "Original - Balanced Weights"
+    difficulty_method: "original"
+    description: "Original with balanced class weights"
+    category: "original_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+
+  - id: "original_cw_heavy_minorities"
+    name: "Original - Heavy Minority Boost"
+    difficulty_method: "original"
+    description: "Original with heavy minority class boosting"
+    category: "original_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 3.0
+      sad: 2.0
+      anger: 2.0
+
+  # Learning Rate Scheduler Variations
+  - id: "original_cosine_scheduler"
+    name: "Original - Cosine Annealing"
+    difficulty_method: "original"
+    description: "Original with cosine annealing scheduler"
+    category: "original_scheduler"
+    learning_rate: 3e-4
+    lr_scheduler: "cosine"
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "original_step_scheduler"
+    name: "Original - Step Decay"
+    difficulty_method: "original"
+    description: "Original with step decay scheduler"
+    category: "original_scheduler"
+    learning_rate: 3e-4
+    lr_scheduler: "step"
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Pacing Strategy Variations
+  - id: "original_linear"
+    name: "Original - Linear Pacing"
+    difficulty_method: "original"
+    description: "Original with linear curriculum pacing"
+    category: "original_pacing"
+    learning_rate: 3e-4
+    curriculum_pacing: "linear"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "original_logarithmic"
+    name: "Original - Logarithmic Pacing"
+    difficulty_method: "original"
+    description: "Original with logarithmic curriculum pacing"
+    category: "original_pacing"
+    learning_rate: 3e-4
+    curriculum_pacing: "logarithmic"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Speaker Variants for Original
+  - id: "original_speaker_default"
+    name: "Original + Speaker - Default"
+    difficulty_method: "original"
+    description: "Original with speaker disentanglement"
+    category: "original_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "original_speaker_heavy_minorities"
+    name: "Original + Speaker - Heavy Minorities"
+    difficulty_method: "original"
+    description: "Original with speaker + heavy minority boost"
+    category: "original_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 3.0
+      sad: 2.0
+      anger: 2.0
+
+  # ========================================
+  # 2. VALENCE-HEAVY BASELINE
+  # ========================================
+  
+  # Class Weight Variations
+  - id: "valence_heavy_cw_default"
+    name: "Valence-Heavy - Default Weights"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with default class weights"
+    category: "valence_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_cw_balanced"
+    name: "Valence-Heavy - Balanced Weights"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with balanced class weights"
+    category: "valence_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+
+  - id: "valence_heavy_cw_extreme"
+    name: "Valence-Heavy - Extreme Boost"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with extreme minority boosting"
+    category: "valence_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 4.0
+      sad: 2.5
+      anger: 2.5
+
+  # Learning Rate Scheduler Variations
+  - id: "valence_heavy_cosine_scheduler"
+    name: "Valence-Heavy - Cosine Annealing"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with cosine annealing scheduler"
+    category: "valence_scheduler"
+    learning_rate: 3e-4
+    lr_scheduler: "cosine"
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_step_scheduler"
+    name: "Valence-Heavy - Step Decay"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with step decay scheduler"
+    category: "valence_scheduler"
+    learning_rate: 3e-4
+    lr_scheduler: "step"
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Pacing Strategy Variations
+  - id: "valence_heavy_linear"
+    name: "Valence-Heavy - Linear Pacing"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with linear pacing"
+    category: "valence_pacing"
+    learning_rate: 3e-4
+    curriculum_pacing: "linear"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_logarithmic"
+    name: "Valence-Heavy - Logarithmic Pacing"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with logarithmic pacing"
+    category: "valence_pacing"
+    learning_rate: 3e-4
+    curriculum_pacing: "logarithmic"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Speaker Variants for Valence-Heavy
+  - id: "valence_heavy_speaker_default"
+    name: "Valence-Heavy + Speaker - Default"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with speaker disentanglement"
+    category: "valence_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "valence_heavy_speaker_extreme"
+    name: "Valence-Heavy + Speaker - Extreme Boost"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with speaker + extreme boost"
+    category: "valence_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 4.0
+      sad: 2.5
+      anger: 2.5
+
+  # ========================================
+  # 3. EUCLIDEAN + SPEAKER
+  # ========================================
+  
+  # Class Weight Variations
+  - id: "euclidean_cw_default"
+    name: "Euclidean - Default Weights"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with default class weights"
+    category: "euclidean_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "euclidean_cw_balanced"
+    name: "Euclidean - Balanced Weights"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with balanced class weights"
+    category: "euclidean_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+
+  - id: "euclidean_cw_extreme"
+    name: "Euclidean - Extreme Boost"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with extreme minority boosting"
+    category: "euclidean_class_weights"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 4.0
+      sad: 2.5
+      anger: 2.5
+
+  # Learning Rate Scheduler Variations
+  - id: "euclidean_cosine_scheduler"
+    name: "Euclidean - Cosine Annealing"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with cosine annealing scheduler"
+    category: "euclidean_scheduler"
+    learning_rate: 3e-4
+    lr_scheduler: "cosine"
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "euclidean_step_scheduler"
+    name: "Euclidean - Step Decay"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with step decay scheduler"
+    category: "euclidean_scheduler"
+    learning_rate: 3e-4
+    lr_scheduler: "step"
+    curriculum_pacing: "exponential"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Pacing Strategy Variations
+  - id: "euclidean_linear"
+    name: "Euclidean - Linear Pacing"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with linear pacing"
+    category: "euclidean_pacing"
+    learning_rate: 3e-4
+    curriculum_pacing: "linear"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "euclidean_logarithmic"
+    name: "Euclidean - Logarithmic Pacing"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with logarithmic pacing"
+    category: "euclidean_pacing"
+    learning_rate: 3e-4
+    curriculum_pacing: "logarithmic"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  # Speaker Variants for Euclidean
+  - id: "euclidean_speaker_default"
+    name: "Euclidean + Speaker - Default"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with speaker disentanglement"
+    category: "euclidean_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+
+  - id: "euclidean_speaker_extreme"
+    name: "Euclidean + Speaker - Extreme Boost"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with speaker + extreme boost"
+    category: "euclidean_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 4.0
+      sad: 2.5
+      anger: 2.5
+
+  - id: "euclidean_speaker_balanced"
+    name: "Euclidean + Speaker - Balanced"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with speaker + balanced weights"
+    category: "euclidean_speaker"
+    learning_rate: 3e-4
+    curriculum_pacing: "exponential"
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+
+# Expected results for comparison (from previous runs)
+expected_results:
+  original_baseline_reference:
+    iemocap_wa: 0.6996
+    iemocap_uar: 0.6705
+    cross_uar: 0.4367
+    
+  valence_heavy_reference:
+    iemocap_wa: 0.6868
+    iemocap_uar: 0.6723
+    cross_uar: 0.4332
+    
+  euclidean_reference:
+    iemocap_wa: 0.6815
+    iemocap_uar: 0.6490
+    cross_uar: 0.4169
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  # Performance thresholds
+  thresholds:
+    excellent_wa: 0.70
+    good_wa: 0.65
+    excellent_cross: 0.45
+    good_cross: 0.40
+
+# Estimated runtime
+estimated_runtime:
+  total_experiments: 27
+  minutes_per_experiment: 42
+  total_hours: 18.9

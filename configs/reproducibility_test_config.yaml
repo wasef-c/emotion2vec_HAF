@@ -1,0 +1,92 @@
+# Simple Reproducibility Test
+# Run original baseline and preset curriculum twice each to verify identical results
+
+study_name: "reproducibility_test"
+wandb_project: "emotion2vec_reproducibility"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 2
+  batch_size: 20
+  learning_rate: 3e-4
+  weight_decay: 1e-4
+  lr_scheduler: "cosine"  # Use cosine (original behavior)
+  
+  # Class weights (current best)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Curriculum learning
+  use_curriculum_learning: false
+  curriculum_epochs: 15
+  curriculum_pacing: "exponential"
+  
+  # Other settings
+  use_speaker_disentanglement: false
+  single_test_session: 5
+
+# Experiment definitions - 4 experiments total
+experiments:
+  # ========================================
+  # ORIGINAL BASELINE - Run 1
+  # ========================================
+  - id: "baseline_run1"
+    name: "Original Baseline - Run 1"
+    difficulty_method: "original"
+    description: "Baseline - first run"
+    category: "original_baseline"
+
+  # ========================================
+  # ORIGINAL BASELINE - Run 2 (should be identical)
+  # ========================================
+  - id: "baseline_run2"
+    name: "Original Baseline - Run 2"
+    difficulty_method: "original"
+    description: "Baseline - second run (should match run 1)"
+    category: "original_baseline"
+
+  # # ========================================
+  # # PRESET CURRICULUM - Run 1
+  # # ========================================
+  # - id: "preset_curriculum_run1"
+  #   name: "Preset Curriculum - Run 1"
+  #   difficulty_method: "preset"
+  #   description: "Preset curriculum using curriculum_order column - first run"
+  #   category: "preset_curriculum"
+
+  # # ========================================
+  # # PRESET CURRICULUM - Run 2 (should be identical)
+  # # ========================================
+  # - id: "preset_curriculum_run2"
+  #   name: "Preset Curriculum - Run 2"
+  #   difficulty_method: "preset"
+  #   description: "Preset curriculum using curriculum_order column - second run (should match run 1)"
+  #   category: "preset_curriculum"
+
+# Expected results for comparison
+expected_results:
+  # If reproducibility works, run1 and run2 should be identical
+  reproducibility_target:
+    max_difference: 0.0001  # Should be virtually identical (within floating point precision)
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  # Reproducibility thresholds
+  thresholds:
+    identical_threshold: 0.0001   # Results should be within 0.01%
+    acceptable_threshold: 0.001   # Max acceptable difference is 0.1%
+
+# Estimated runtime
+estimated_runtime:
+  total_experiments: 4
+  minutes_per_experiment: 42
+  total_hours: 2.8

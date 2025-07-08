@@ -1,451 +1,420 @@
-from data.dataset import (
-    EmotionDataset,
-    collate_fn,
-    CombinedSampler,
-    CurriculumSampler,
-)
-from models.AdaptiveEmotionalSalience import (
-    AdaptiveEmotionalSaliency,
-    AdaptiveSaliencyLoss,
-    visualize_saliency,
-)
-from config import ExperimentConfig
-from train import train_epoch
-from evaluate import enhanced_evaluate
-from utils import (
-    get_session_splits,
-    split_session_data,
-    calculate_class_weights,
-    get_unique_save_dir,
-    plot_confusion_matrix,
-    SpeakerGroupedSampler,
-)
-from metrics import calculate_comprehensive_metrics
+"""
+Main script for emotion recognition with curriculum learning
+"""
 
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import Subset
 import numpy as np
-from pathlib import Path
 import wandb
-import json
-import torch.multiprocessing as mp
+import argparse
+from pathlib import Path
+import matplotlib.pyplot as plt
+import seaborn as sns
+import random
 import os
 
+# CRITICAL: Set deterministic behavior IMMEDIATELY at import time
+def force_deterministic_behavior():
+    """Force deterministic behavior with maximum settings"""
+    seed = 42
+    
+    print(f"🎲 FORCING DETERMINISTIC BEHAVIOR (seed={seed})")
+    
+    # Python random
+    random.seed(seed)
+    
+    # NumPy random  
+    import numpy as np
+    np.random.seed(seed)
+    
+    # PyTorch random
+    import torch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    
+    # Environment variables BEFORE any CUDA operations
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    os.environ['CUBLAS_DETERMINISTIC_OPS'] = '1'
+    
+    # PyTorch deterministic settings
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    
+    # Force deterministic algorithms
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    
+    print("✅ DETERMINISTIC BEHAVIOR FORCED")
 
-# os.environ["WANDB_MODE"] = "offline"
+# Call this IMMEDIATELY at import
+force_deterministic_behavior()
 
-# Set multiprocessing start method to 'spawn' for CUDA compatibility
-mp.set_start_method("spawn", force=True)
+from config import Config
+from functions import (
+    EmotionDataset,
+    AdaptiveEmotionalSaliency,
+    AdaptiveSaliencyLoss,
+    train_epoch,
+    evaluate,
+    get_session_splits,
+    create_train_val_test_splits,
+    apply_custom_difficulty,
+    create_data_loader,
+    calculate_metrics,
+)
 
 
-def main():
-    # Configuration - experiment name will be generated automatically
-    config = ExperimentConfig()
+def set_all_seeds(seed=42):
+    """Set all possible random seeds for reproducibility"""
+    print(f"🎲 Setting all random seeds to {seed}")
+    
+    # Python random
+    random.seed(seed)
+    
+    # NumPy random
+    np.random.seed(seed)
+    
+    # PyTorch random
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For multi-GPU
+    
+    # Ensure deterministic behavior
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    # Set environment variables for additional determinism
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+    
+    # Additional environment variables for determinism
+    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    os.environ['CUBLAS_DETERMINISTIC_OPS'] = '1'
+    
+    # Use deterministic algorithms where possible
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception as e:
+        print(f"⚠️  Could not set deterministic algorithms: {e}")
+    
+    # Additional PyTorch deterministic settings
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Force deterministic behavior for specific operations
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+    
+    print("✅ All seeds set for reproducibility")
 
-    # Model configuration
-    config.pretrain_dir = None  # "/path/to/pretrained/model.pt"
 
-    print(f"Experiment name: {config.experiment_name}")
+def run_single_experiment(
+    config,
+    iemocap_dataset,
+    msp_dataset,
+    difficulty_method=None,
+    vad_weights=None,
+    experiment_name=None,
+):
+    """Run a single emotion recognition experiment with LOSO evaluation"""
 
-    # Create directories
-    save_dir = get_unique_save_dir(config.experiment_name)
-    run_name = os.path.basename(config.experiment_name)
+    # CRITICAL: Set seeds at start of EVERY experiment run
+    set_all_seeds(42)
+    
+    # Clear GPU cache for clean state
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    save_dir = Path(save_dir)
-    save_dir.mkdir(exist_ok=True)
-    results_dir = save_dir / "results"
-    results_dir.mkdir(exist_ok=True)
+    # Setup
+    device = config.device
+    if experiment_name:
+        wandb.init(
+            project=config.wandb_project, name=experiment_name, config=config.to_dict()
+        )
 
-    # Initialize wandb
-    wandb.init(project=config.wandb_project, config=config.to_dict(), name=run_name)
+    print(f"🚀 Starting experiment: {experiment_name or 'Single Run'}")
+    print(f"Device: {device}")
+    print(f"Difficulty method: {difficulty_method or 'original'}")
 
-    # Load datasets
-    print("Loading datasets...")
-    iemocap_train = EmotionDataset("IEMOCAP", split="train")
-    msp_improv = EmotionDataset("MSP-IMPROV", split="train")
+    # Get session splits
+    session_splits = get_session_splits(iemocap_dataset)
 
-    # Get session splits for IEMOCAP
-    session_splits = get_session_splits(iemocap_train)
+    # Determine test sessions
+    if config.single_test_session:
+        test_sessions = [config.single_test_session]
+        print(
+            f"🎯 Single session mode: Testing on session {config.single_test_session}"
+        )
+    else:
+        test_sessions = list(session_splits.keys())
+        print(f"🔄 Full LOSO mode: Testing on sessions {test_sessions}")
 
-    # Initialize lists for storing results
-    cross_corpus_results = []  # Initialize as a list
+    # Store results
     all_results = []
     all_was = []
     all_uars = []
     all_f1s_weighted = []
     all_f1s_macro = []
-    all_class_accuracies = []
-    all_saliency_analysis = []  # Changed from fusion_analysis
-    cross_corpus_best_metrics = []  # To store best cross-corpus metrics per session
+    cross_corpus_results = []
 
-    for test_session in session_splits.keys():
-        print(f"\nLeave-One-Session-Out: Testing on Session {test_session}")
+    # LOSO evaluation
+    for test_session in test_sessions:
+        print(f"\n{'='*60}")
+        print(f"Leave-One-Session-Out: Testing on Session {test_session}")
+        print(f"{'='*60}")
 
-        # Create session-specific directories
-        session_dir = results_dir / f"session_{test_session}"
-        session_dir.mkdir(exist_ok=True)
+        # Create splits using simplified function
+        train_indices, val_indices, test_indices = create_train_val_test_splits(
+            iemocap_dataset, test_session, val_ratio=0.2
+        )
 
-        # Split IEMOCAP data
-        test_indices = session_splits[test_session]  # This is the held-out session
-        train_indices = []
-        for session, indices in session_splits.items():
-            if session != test_session:
-                train_indices.extend(indices)  # All other sessions
+        print(
+            f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)}"
+        )
+
+        # Debug: Check if indices are valid
+        print(f"Sample train indices: {train_indices[:10]}")
+        print(f"Dataset size: {len(iemocap_dataset)}")
+
+        # Create datasets
+        train_dataset = Subset(iemocap_dataset, train_indices)
+        val_dataset = Subset(iemocap_dataset, val_indices)
+        test_dataset = Subset(iemocap_dataset, test_indices)
+
+        print(
+            f"Actual subset sizes - Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
+        )
+
+        # Apply custom difficulty calculation if specified
+        if difficulty_method and difficulty_method != "original":
+            apply_custom_difficulty(
+                iemocap_dataset,
+                train_indices,
+                difficulty_method,
+                config.expected_vad,
+                vad_weights,
+            )
 
         # Create data loaders
-        train_dataset = Subset(iemocap_train, train_indices)
-        test_dataset = Subset(iemocap_train, test_indices)
+        train_loader = create_data_loader(train_dataset, config, is_training=True)
+        val_loader = create_data_loader(val_dataset, config, is_training=False)
+        test_loader = create_data_loader(test_dataset, config, is_training=False)
 
-        # Calculate class weights for this split
-        split_class_weights = calculate_class_weights(train_dataset, config.class_names)
-        print(f"\nClass distribution for Session {test_session} training split:")
-        for class_name, weight in split_class_weights.items():
-            print(f"{class_name}: {weight:.2f}")
+        print(
+            f"Data loader batches - Train: {len(train_loader)}, Val: {len(val_loader)}, Test: {len(test_loader)}"
+        )
+        print(f"Batch size: {config.batch_size}")
+        print(
+            f"Expected train batches: {len(train_dataset) // config.batch_size + (1 if len(train_dataset) % config.batch_size > 0 else 0)}"
+        )
 
-        # Combine with base weights
-        final_class_weights = {
-            class_name: base_weight * split_weight
-            for (class_name, base_weight), (_, split_weight) in zip(
-                config.class_weights.items(), split_class_weights.items()
-            )
-        }
+        # Create simple classifier (recommended architecture from arXiv)
+        import torch.nn as nn
+        class SimpleClassifier(nn.Module):
+            def __init__(self, input_dim=768, hidden_dim=256, num_classes=4, dropout=0.2):
+                super().__init__()
+                self.classifier = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, num_classes)
+                )
+            
+            def forward(self, x):
+                # x: [batch, seq_len, input_dim] -> average pool -> [batch, input_dim]
+                x = x.mean(dim=1)  # Global average pooling over time dimension
+                logits = self.classifier(x)
+                return {"logits": logits}
+        
+        model = SimpleClassifier().to(device)
 
-        # Create class weights tensor
+        # Create class weights
         class_weights = torch.tensor(
             [
-                final_class_weights["neutral"],
-                final_class_weights["happy"],
-                final_class_weights["sad"],
-                final_class_weights["anger"],
+                config.class_weights["neutral"],
+                config.class_weights["happy"],
+                config.class_weights["sad"],
+                config.class_weights["anger"],
             ]
-        ).to(config.device)
+        ).to(device)
 
-        print("Final class weights (base * split):")
-        for class_name, weight in final_class_weights.items():
-            print(f"{class_name}: {weight:.2f}")
-
-        # Create data loaders
-        if config.use_curriculum_learning and config.use_speaker_disentanglement:
-            # Use CombinedSampler for both curriculum learning and speaker grouping
-            train_sampler = CombinedSampler(
-                train_dataset,
-                batch_size=config.batch_size,
-                num_epochs=config.num_epochs,
-                start_threshold=config.curriculum["start_threshold"],
-                end_threshold=config.curriculum["end_threshold"],
-                curriculum_epochs=config.curriculum_epochs,
-            )
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=config.batch_size,
-                sampler=train_sampler,
-                num_workers=0,
-                pin_memory=True,
-                collate_fn=collate_fn,
-            )
-        elif config.use_curriculum_learning:
-            # Use CurriculumSampler for curriculum learning only
-            train_sampler = CurriculumSampler(
-                train_dataset,
-                batch_size=config.batch_size,
-                num_epochs=config.num_epochs,
-                start_threshold=config.curriculum["start_threshold"],
-                end_threshold=config.curriculum["end_threshold"],
-                curriculum_epochs=config.curriculum_epochs,
-            )
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=config.batch_size,
-                sampler=train_sampler,
-                num_workers=0,
-                pin_memory=True,
-                collate_fn=collate_fn,
-            )
-        elif config.use_speaker_disentanglement:
-            # Use SpeakerGroupedSampler for speaker grouping only
-            train_sampler = SpeakerGroupedSampler(
-                train_dataset, batch_size=config.batch_size
-            )
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=config.batch_size,
-                sampler=train_sampler,
-                num_workers=0,
-                pin_memory=True,
-                collate_fn=collate_fn,
-            )
-        else:
-            # Use regular shuffling
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=config.batch_size,
-                shuffle=True,
-                num_workers=0,
-                pin_memory=True,
-                collate_fn=collate_fn,
-            )
-
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=config.batch_size,
-            shuffle=False,
-            num_workers=0,
-            pin_memory=True,
-            collate_fn=collate_fn,
-        )
-
-        # Initialize model
-        model = (
-            AdaptiveEmotionalSaliency(input_dim=768, num_classes=4)
-            .to(config.device)
-            .float()
-        )
-        criterion = AdaptiveSaliencyLoss(class_weights=class_weights)
-
-        if config.pretrain_dir is not None:
-            # Load the backbone state dict
-            checkpoint = torch.load(config.pretrain_dir)
-            # Load the backbone weights directly since we saved only the backbone
-            model.load_state_dict(checkpoint, strict=False)
-            print(f"Loaded pretrained backbone from {config.pretrain_dir}")
-
+        criterion = AdaptiveSaliencyLoss(class_weights=class_weights, saliency_weight=0.0, diversity_weight=0.0)
         optimizer = optim.AdamW(
             model.parameters(),
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
         )
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=config.num_epochs
-        )
+        
+        # Configure learning rate scheduler based on config
+        scheduler = None
+        if config.lr_scheduler == "cosine":
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=config.num_epochs
+            )
+        elif config.lr_scheduler == "step":
+            scheduler = optim.lr_scheduler.StepLR(
+                optimizer, step_size=config.num_epochs//3, gamma=0.1
+            )
+        elif config.lr_scheduler == "exponential":
+            scheduler = optim.lr_scheduler.ExponentialLR(
+                optimizer, gamma=0.95
+            )
+        elif config.lr_scheduler == "plateau":
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode='max', factor=0.5, patience=3, verbose=True
+            )
+        # If None or unrecognized, no scheduler will be used
 
         # Training loop
-        best_val_acc = 0
-        best_val_wa = 0
         best_val_uar = 0
-        best_val_f1_weighted = 0
-        best_val_f1_macro = 0
-        best_metrics = None
-        best_confusion_matrix = None
-        best_epoch = -1
-
-        # Early stopping variables
-        patience_counter = 0
-        best_val_uar_so_far = 0
         best_model_state = None
-        best_cross_corpus_mean = -float("inf")
-        best_cross_corpus_metrics = None
-        best_cross_corpus_epoch = -1
+        patience_counter = 0
 
         for epoch in range(config.num_epochs):
-            # Update sampler epoch if using curriculum learning
-            if config.use_curriculum_learning:
-                train_sampler.set_epoch(epoch)
+            # Update curriculum sampler epoch
+            if hasattr(train_loader.sampler, "set_epoch"):
+                train_loader.sampler.set_epoch(epoch)
+
+                # Log curriculum progress if using curriculum learning
+                if config.use_curriculum_learning:
+                    sampler = train_loader.sampler
+                    epoch_progress = min(1.0, epoch / sampler.curriculum_epochs)
+                    progress = sampler._calculate_progress(epoch_progress)
+
+                    if epoch < sampler.curriculum_epochs:
+                        current_threshold = (
+                            sampler.start_threshold
+                            + (sampler.end_threshold - sampler.start_threshold)
+                            * progress
+                        )
+                        curriculum_samples = len(
+                            [
+                                idx
+                                for idx, diff in zip(
+                                    sampler.sorted_indices, sampler.sorted_difficulties
+                                )
+                                if diff <= current_threshold
+                            ]
+                        )
+                    else:
+                        current_threshold = 1.0
+                        curriculum_samples = len(sampler.all_indices)
+
+                    if wandb.run:
+                        wandb.log(
+                            {
+                                f"session_{test_session}/curriculum_threshold": current_threshold,
+                                f"session_{test_session}/curriculum_samples": curriculum_samples,
+                                f"session_{test_session}/curriculum_progress": progress,
+                            }
+                        )
 
             # Train
+            model.train()  # Ensure training mode
             train_metrics = train_epoch(
-                model, train_loader, criterion, optimizer, config.device, epoch
+                model, train_loader, criterion, optimizer, device, epoch
             )
 
-            # Validate on held-out test set
-            val_metrics = enhanced_evaluate(
-                model,
-                test_loader,  # Using test_loader for validation
-                criterion,
-                config.device,
-                epoch,
-                None,  # Don't save during training
-                eval_type="validation",
-                session_info=test_session,
-            )
+            # Validate
+            val_metrics = evaluate(model, val_loader, criterion, device)
 
-            # Update learning rate
-            scheduler.step()
-
-            # Early stopping check on validation set
-            current_val_uar = val_metrics["uar"]
-            if (
-                current_val_uar
-                > best_val_uar_so_far + config.early_stopping["min_delta"]
-            ):
-                print("--------------New best model saved---------------")
-                best_val_uar_so_far = current_val_uar
+            # Update learning rate if scheduler is configured
+            if scheduler is not None:
+                current_lr = optimizer.param_groups[0]['lr']
+                if config.lr_scheduler == "plateau":
+                    # ReduceLROnPlateau needs the validation metric
+                    scheduler.step(val_metrics["uar"])
+                else:
+                    # Other schedulers don't need metrics
+                    scheduler.step()
+                new_lr = optimizer.param_groups[0]['lr']
+                print(f"Epoch {epoch+1}: LR {current_lr:.1e} -> {new_lr:.1e} (scheduler: {config.lr_scheduler})")
+            
+            # Early stopping (but not before epoch 15)
+            if val_metrics["uar"] > best_val_uar + config.early_stopping_min_delta:
+                best_val_uar = val_metrics["uar"]
                 patience_counter = 0
-                # Save best model state and metrics
-                best_model_state = {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "val_acc": val_metrics["accuracy"],
-                    "val_wa": val_metrics["wa"],
-                    "val_uar": val_metrics["uar"],
-                    "val_f1_weighted": val_metrics["f1_weighted"],
-                    "val_f1_macro": val_metrics["f1_macro"],
-                }
-                best_metrics = val_metrics
-                best_confusion_matrix = val_metrics["confusion_matrix"]
-                best_epoch = epoch
-                # Save best model
-                torch.save(
-                    best_model_state,
-                    save_dir / f"best_model_session_{test_session}.pt",
-                )
+                best_model_state = model.state_dict().copy()
+                print(f"Val UAR: {val_metrics['uar']:.4f} ⭐ NEW BEST")
             else:
                 patience_counter += 1
-                if patience_counter >= config.early_stopping["patience"]:
-                    print(f"\nEarly stopping triggered after {epoch + 1} epochs")
-                    print(f"Best validation UAR: {best_val_uar_so_far:.4f}")
+                print(
+                    f"Val UAR: {val_metrics['uar']:.4f} (Best: {best_val_uar:.4f}, Patience: {patience_counter}/{config.early_stopping_patience})"
+                )
+                # Only allow early stopping after epoch 15
+                if (
+                    epoch >= 14 and patience_counter >= config.early_stopping_patience
+                ):  # epoch 14 = 15th epoch (0-indexed)
+                    print(f"Early stopping at epoch {epoch+1}")
                     break
 
-            # Log metrics
-            wandb.log(
-                {
-                    f"session_{test_session}/train_loss": train_metrics["loss"],
-                    f"session_{test_session}/train_acc": train_metrics["accuracy"],
-                    f"session_{test_session}/train_wa": train_metrics["wa"],
-                    f"session_{test_session}/train_uar": train_metrics["uar"],
-                    f"session_{test_session}/train_f1_weighted": train_metrics[
-                        "f1_weighted"
-                    ],
-                    f"session_{test_session}/train_f1_macro": train_metrics["f1_macro"],
-                    f"session_{test_session}/val_loss": val_metrics["loss"],
-                    f"session_{test_session}/val_acc": val_metrics["accuracy"],
-                    f"session_{test_session}/val_wa": val_metrics["wa"],
-                    f"session_{test_session}/val_uar": val_metrics["uar"],
-                    f"session_{test_session}/val_f1_weighted": val_metrics[
-                        "f1_weighted"
-                    ],
-                    f"session_{test_session}/val_f1_macro": val_metrics["f1_macro"],
-                    f"session_{test_session}/learning_rate": scheduler.get_last_lr()[0],
-                }
-            )
+            # Log to wandb
+            if wandb.run:
+                current_lr = optimizer.param_groups[0]['lr']
+                wandb.log(
+                    {
+                        f"session_{test_session}/train/uar": train_metrics["uar"],
+                        f"session_{test_session}/train/loss": train_metrics["loss"],
+                        f"session_{test_session}/val/uar": val_metrics["uar"],
+                        f"session_{test_session}/val/loss": val_metrics["loss"],
+                        f"session_{test_session}/val/wa": val_metrics["wa"],
+                        f"session_{test_session}/val/f1_macro": val_metrics["f1_macro"],
+                        f"session_{test_session}/val/f1_weighted": val_metrics[
+                            "f1_weighted"
+                        ],
+                        f"session_{test_session}/val/accuracy": val_metrics["accuracy"],
+                        f"session_{test_session}/learning_rate": current_lr,
+                        "epoch": epoch,
+                        "global_step": epoch
+                        + test_session
+                        * config.num_epochs,  # Unique step for proper timeline
+                    }
+                )
 
-        # Save best metrics and confusion matrix
-        if best_metrics is not None:
-            # Create evaluation directories
-            held_out_dir = session_dir / "held_out_evaluation"
-            held_out_dir.mkdir(exist_ok=True)
+                # Also log aggregated validation metrics across all sessions so far
+                if len(all_uars) > 0:
+                    wandb.log(
+                        {
+                            "aggregated/val/uar": np.mean(all_uars + [val_metrics["uar"]]),
+                            "aggregated/val/wa": np.mean(all_was + [val_metrics["wa"]]),
+                            "epoch": epoch,
+                            "global_step": epoch + test_session * config.num_epochs,
+                        }
+                    )
 
-            # Save best confusion matrix
-            cm_path = held_out_dir / "best_confusion_matrix.png"
-            plot_confusion_matrix(
-                np.array(best_confusion_matrix), config.class_names, cm_path
-            )
+        # Load best model and evaluate
+        if best_model_state:
+            model.load_state_dict(best_model_state)
 
-            # Save best metrics
-            metrics_path = held_out_dir / "best_metrics.json"
-            with open(metrics_path, "w") as f:
-                json.dump({"epoch": best_epoch, "metrics": best_metrics}, f, indent=4)
+        # Test evaluation
+        print(f"\nFinal evaluation on Session {test_session}...")
+        test_metrics = evaluate(model, test_loader, criterion, device)
 
-        # Load best model for final evaluation
-        print(f"\nLoading best model for Session {test_session}...")
-        if best_model_state is None:
-            # If no model was saved during training (shouldn't happen), load the last saved one
-            checkpoint = torch.load(save_dir / f"best_model_session_{test_session}.pt")
-        else:
-            checkpoint = best_model_state
+        # Cross-corpus evaluation
+        print("Cross-corpus evaluation on MSP-IMPROV...")
+        msp_loader = create_data_loader(msp_dataset, config, is_training=False)
+        msp_metrics = evaluate(model, msp_loader, criterion, device)
 
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print(
-            f"Loaded model from epoch {checkpoint['epoch']} with validation UAR: {checkpoint['val_uar']:.4f}"
-        )
-
-        # Cross-corpus evaluation on MSP-IMPROV
-        print("\nEvaluating on MSP-IMPROV...")
-        msp_loader = DataLoader(
-            msp_improv,
-            batch_size=config.batch_size,
-            shuffle=False,
-            num_workers=0,
-            pin_memory=True,
-            collate_fn=collate_fn,
-        )
-        msp_metrics = enhanced_evaluate(
-            model,
-            msp_loader,
-            criterion,
-            config.device,
-            epoch=None,  # Final evaluation
-            save_dir=session_dir / "cross_corpus_evaluation",
-            eval_type="cross_corpus",
-            session_info=test_session,
-        )
-
-        # Store results for final summary
-        all_results.append(best_metrics["accuracy"])
-        all_was.append(best_metrics["wa"])
-        all_uars.append(best_metrics["uar"])
-        all_f1s_weighted.append(best_metrics["f1_weighted"])
-        all_f1s_macro.append(best_metrics["f1_macro"])
-        all_class_accuracies.append(best_metrics["class_accuracies"])
-        all_saliency_analysis.append(best_metrics["saliency_analysis"])
+        # Store results
+        all_results.append(test_metrics["accuracy"])
+        all_was.append(test_metrics["wa"])
+        all_uars.append(test_metrics["uar"])
+        all_f1s_weighted.append(test_metrics["f1_weighted"])
+        all_f1s_macro.append(test_metrics["f1_macro"])
         cross_corpus_results.append(msp_metrics)
 
-    # Calculate and print averaged LOSO results
-    print("\nAveraged LOSO Results:")
-    print("=" * 50)
+        print(f"Session {test_session} Results:")
+        print(f"  IEMOCAP UAR: {test_metrics['uar']:.4f}")
+        print(f"  Cross-corpus UAR: {msp_metrics['uar']:.4f}")
 
-    # Calculate average confusion matrix
-    avg_confusion_matrix = np.zeros((4, 4))  # 4x4 for 4 emotion classes
-    for session, results in enumerate(all_results, 1):
-        session_dir = results_dir / f"session_{session}"
-        held_out_dir = session_dir / "held_out_evaluation"
-        with open(held_out_dir / "best_metrics.json", "r") as f:
-            session_results = json.load(f)
-            avg_confusion_matrix += np.array(
-                session_results["metrics"]["confusion_matrix"]
-            )
-    avg_confusion_matrix /= len(all_results)
-
-    # Save averaged confusion matrix
-    avg_cm_path = results_dir / "averaged_confusion_matrix.png"
-    plot_confusion_matrix(avg_confusion_matrix, config.class_names, avg_cm_path)
-
-    # Calculate and print averaged metrics
-    print("\nAveraged Metrics:")
-    print(f"Accuracy: {np.mean(all_results):.4f} ± {np.std(all_results):.4f}")
-    print(f"WA: {np.mean(all_was):.4f} ± {np.std(all_was):.4f}")
-    print(f"UAR: {np.mean(all_uars):.4f} ± {np.std(all_uars):.4f}")
-    print(
-        f"F1-Weighted: {np.mean(all_f1s_weighted):.4f} ± {np.std(all_f1s_weighted):.4f}"
-    )
-    print(f"F1-Macro: {np.mean(all_f1s_macro):.4f} ± {np.std(all_f1s_macro):.4f}")
-
-    # Calculate averaged class accuracies
-    avg_class_accuracies = {}
-    for class_name in config.class_names:
-        accuracies = [acc[class_name] for acc in all_class_accuracies]
-        avg_class_accuracies[class_name] = {
-            "mean": float(np.mean(accuracies)),
-            "std": float(np.std(accuracies)),
-        }
-
-    print("\nAveraged Class-wise Accuracies:")
-    for class_name, stats in avg_class_accuracies.items():
-        print(f"{class_name}: {stats['mean']:.4f} ± {stats['std']:.4f}")
-
-    # Calculate averaged saliency analysis
-    avg_saliency_analysis = {}
-    saliency_keys = [
-        "mean_saliency",
-        "std_saliency",
-        "high_saliency_ratio",
-        "saliency_entropy",
-    ]
-    for key in saliency_keys:
-        values = [analysis[key] for analysis in all_saliency_analysis]
-        avg_saliency_analysis[key] = {
-            "mean": float(np.mean(values)),
-            "std": float(np.std(values)),
-        }
-
-    print("\nAveraged Saliency Analysis:")
-    for key, stats in avg_saliency_analysis.items():
-        print(f"{key}: {stats['mean']:.4f} ± {stats['std']:.4f}")
-
-    # Save averaged results
-    averaged_results = {
-        "metrics": {
+    # Calculate final averaged results
+    final_results = {
+        "iemocap_results": {
             "accuracy": {
                 "mean": float(np.mean(all_results)),
                 "std": float(np.std(all_results)),
@@ -460,144 +429,254 @@ def main():
                 "mean": float(np.mean(all_f1s_macro)),
                 "std": float(np.std(all_f1s_macro)),
             },
-            "class_accuracies": avg_class_accuracies,
-            "saliency_analysis": avg_saliency_analysis,
-        },
-        "confusion_matrix": avg_confusion_matrix.tolist(),
-    }
-
-    with open(results_dir / "averaged_results.json", "w") as f:
-        json.dump(averaged_results, f, indent=4)
-
-    # Log averaged results to wandb
-    wandb.log(
-        {
-            "averaged_confusion_matrix": wandb.Image(str(avg_cm_path)),
-            "averaged_accuracy": np.mean(all_results),
-            "averaged_wa": np.mean(all_was),
-            "averaged_uar": np.mean(all_uars),
-            "averaged_f1_weighted": np.mean(all_f1s_weighted),
-            "averaged_f1_macro": np.mean(all_f1s_macro),
-        }
-    )
-
-    for class_name, stats in avg_class_accuracies.items():
-        wandb.log({f"averaged_{class_name}_accuracy": stats["mean"]})
-
-    for key, stats in avg_saliency_analysis.items():
-        wandb.log({f"averaged_{key}": stats["mean"]})
-
-    # Calculate and print averaged cross-corpus results
-    print("\nAveraged Cross-Corpus Results:")
-    print("=" * 50)
-
-    cross_corpus_metrics = {
-        "accuracy": [r["accuracy"] for r in cross_corpus_results],
-        "wa": [r["wa"] for r in cross_corpus_results],
-        "uar": [r["uar"] for r in cross_corpus_results],
-        "f1_weighted": [r["f1_weighted"] for r in cross_corpus_results],
-        "f1_macro": [r["f1_macro"] for r in cross_corpus_results],
-    }
-
-    print("\nAveraged Cross-Corpus Metrics:")
-    for metric_name, values in cross_corpus_metrics.items():
-        print(f"{metric_name}: {np.mean(values):.4f} ± {np.std(values):.4f}")
-
-    # Save final results
-    results = {
-        "iemocap_results": {
-            "session_results": {
-                f"session_{i+1}": {
-                    "accuracy": float(acc),
-                    "wa": float(wa),
-                    "uar": float(uar),
-                    "f1_weighted": float(f1_weighted),
-                    "f1_macro": float(f1_macro),
-                    "class_accuracies": class_accuracies,
-                    "saliency_analysis": saliency_analysis,
-                }
-                for i, (
-                    acc,
-                    wa,
-                    uar,
-                    f1_weighted,
-                    f1_macro,
-                    class_accuracies,
-                    saliency_analysis,
-                ) in enumerate(
-                    zip(
-                        all_results,
-                        all_was,
-                        all_uars,
-                        all_f1s_weighted,
-                        all_f1s_macro,
-                        all_class_accuracies,
-                        all_saliency_analysis,
-                    )
-                )
-            },
-            "averages": {
-                "accuracy": {
-                    "mean": float(np.mean(all_results)),
-                    "std": float(np.std(all_results)),
-                },
-                "wa": {"mean": float(np.mean(all_was)), "std": float(np.std(all_was))},
-                "uar": {
-                    "mean": float(np.mean(all_uars)),
-                    "std": float(np.std(all_uars)),
-                },
-                "f1_weighted": {
-                    "mean": float(np.mean(all_f1s_weighted)),
-                    "std": float(np.std(all_f1s_weighted)),
-                },
-                "f1_macro": {
-                    "mean": float(np.mean(all_f1s_macro)),
-                    "std": float(np.std(all_f1s_macro)),
-                },
-            },
         },
         "cross_corpus_results": {
-            "session_results": {
-                f"session_{i+1}": {
-                    "accuracy": float(results["accuracy"]),
-                    "wa": float(results["wa"]),
-                    "uar": float(results["uar"]),
-                    "f1_weighted": float(results["f1_weighted"]),
-                    "f1_macro": float(results["f1_macro"]),
-                    "class_accuracies": results["class_accuracies"],
-                    "saliency_analysis": results["saliency_analysis"],
-                }
-                for i, results in enumerate(cross_corpus_results)
+            "accuracy": {
+                "mean": float(np.mean([r["accuracy"] for r in cross_corpus_results])),
+                "std": float(np.std([r["accuracy"] for r in cross_corpus_results])),
             },
-            "averages": {
-                "accuracy": {
-                    "mean": float(np.mean(cross_corpus_metrics["accuracy"])),
-                    "std": float(np.std(cross_corpus_metrics["accuracy"])),
-                },
-                "wa": {
-                    "mean": float(np.mean(cross_corpus_metrics["wa"])),
-                    "std": float(np.std(cross_corpus_metrics["wa"])),
-                },
-                "uar": {
-                    "mean": float(np.mean(cross_corpus_metrics["uar"])),
-                    "std": float(np.std(cross_corpus_metrics["uar"])),
-                },
-                "f1_weighted": {
-                    "mean": float(np.mean(cross_corpus_metrics["f1_weighted"])),
-                    "std": float(np.std(cross_corpus_metrics["f1_weighted"])),
-                },
-                "f1_macro": {
-                    "mean": float(np.mean(cross_corpus_metrics["f1_macro"])),
-                    "std": float(np.std(cross_corpus_metrics["f1_macro"])),
-                },
+            "uar": {
+                "mean": float(np.mean([r["uar"] for r in cross_corpus_results])),
+                "std": float(np.std([r["uar"] for r in cross_corpus_results])),
+            },
+            "f1_macro": {
+                "mean": float(np.mean([r["f1_macro"] for r in cross_corpus_results])),
+                "std": float(np.std([r["f1_macro"] for r in cross_corpus_results])),
             },
         },
     }
 
-    with open(save_dir / "final_results.json", "w") as f:
-        json.dump(results, f, indent=4)
+    # Calculate final confusion matrices for logging
+    if wandb.run:
+        # Collect all test predictions and labels for final confusion matrix
+        all_test_preds = []
+        all_test_labels = []
+        all_cross_preds = []
+        all_cross_labels = []
 
-    wandb.finish()
+        # Re-evaluate to get predictions for confusion matrix
+        for test_session in test_sessions:
+            train_indices, val_indices, test_indices = create_train_val_test_splits(
+                iemocap_dataset, test_session, val_ratio=0.2
+            )
+            test_dataset = Subset(iemocap_dataset, test_indices)
+            test_loader = create_data_loader(test_dataset, config, is_training=False)
+
+            # Get test predictions
+            model.eval()
+            with torch.no_grad():
+                for batch in test_loader:
+                    features = batch["features"].to(device)
+                    labels = batch["label"]
+                    outputs = model(features)
+                    preds = torch.argmax(outputs["logits"], dim=1).cpu().numpy()
+                    all_test_preds.extend(preds)
+                    all_test_labels.extend(labels.numpy())
+
+        # Get cross-corpus predictions
+        msp_loader = create_data_loader(msp_dataset, config, is_training=False)
+        model.eval()
+        with torch.no_grad():
+            for batch in msp_loader:
+                features = batch["features"].to(device)
+                labels = batch["label"]
+                outputs = model(features)
+                preds = torch.argmax(outputs["logits"], dim=1).cpu().numpy()
+                all_cross_preds.extend(preds)
+                all_cross_labels.extend(labels.numpy())
+
+        # Create confusion matrices
+        from sklearn.metrics import confusion_matrix
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        # IEMOCAP confusion matrix
+        iemocap_cm = confusion_matrix(
+            all_test_labels, all_test_preds, labels=[0, 1, 2, 3]
+        )
+        iemocap_uar = final_results["iemocap_results"]["uar"]["mean"]
+        iemocap_wa = final_results["iemocap_results"]["wa"]["mean"]
+
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(
+            iemocap_cm,
+            annot=True,
+            fmt="d",
+            cmap="Blues",
+            xticklabels=["Neutral", "Happy", "Sad", "Anger"],
+            yticklabels=["Neutral", "Happy", "Sad", "Anger"],
+        )
+        plt.title(
+            f"IEMOCAP LOSO Confusion Matrix\nUAR: {iemocap_uar:.4f}, WA: {iemocap_wa:.4f}"
+        )
+        plt.ylabel("True Label")
+        plt.xlabel("Predicted Label")
+        wandb.log(
+            {
+                "iemocap_confusion_matrix": wandb.Image(
+                    plt,
+                    caption=f"IEMOCAP LOSO - UAR: {iemocap_uar:.4f}, WA: {iemocap_wa:.4f}",
+                )
+            }
+        )
+        plt.close()
+
+        # Cross-corpus confusion matrix
+        cross_cm = confusion_matrix(
+            all_cross_labels, all_cross_preds, labels=[0, 1, 2, 3]
+        )
+        cross_uar = final_results["cross_corpus_results"]["uar"]["mean"]
+        cross_wa = final_results["cross_corpus_results"]["accuracy"][
+            "mean"
+        ]  # Note: cross-corpus uses 'accuracy' not 'wa'
+
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(
+            cross_cm,
+            annot=True,
+            fmt="d",
+            cmap="Oranges",
+            xticklabels=["Neutral", "Happy", "Sad", "Anger"],
+            yticklabels=["Neutral", "Happy", "Sad", "Anger"],
+        )
+        plt.title(
+            f"Cross-Corpus (MSP-IMPROV) Confusion Matrix\nUAR: {cross_uar:.4f}, WA: {cross_wa:.4f}"
+        )
+        plt.ylabel("True Label")
+        plt.xlabel("Predicted Label")
+        wandb.log(
+            {
+                "cross_corpus_confusion_matrix": wandb.Image(
+                    plt,
+                    caption=f"Cross-Corpus MSP-IMPROV - UAR: {cross_uar:.4f}, WA: {cross_wa:.4f}",
+                )
+            }
+        )
+        plt.close()
+
+        # Log final metrics
+        wandb.log(
+            {
+                "final/iemocap/uar": final_results["iemocap_results"]["uar"]["mean"],
+                "final/cross_corpus/uar": final_results["cross_corpus_results"]["uar"][
+                    "mean"
+                ],
+                "final/iemocap/accuracy": final_results["iemocap_results"]["accuracy"][
+                    "mean"
+                ],
+                "final/cross_corpus/accuracy": final_results["cross_corpus_results"][
+                    "accuracy"
+                ]["mean"],
+            }
+        )
+        wandb.finish()
+
+    # Print final summary
+    print(f"\n{'='*60}")
+    print(f"FINAL RESULTS")
+    print(f"{'='*60}")
+    print(
+        f"IEMOCAP UAR: {final_results['iemocap_results']['uar']['mean']:.4f} ± {final_results['iemocap_results']['uar']['std']:.4f}"
+    )
+    print(
+        f"Cross-corpus UAR: {final_results['cross_corpus_results']['uar']['mean']:.4f} ± {final_results['cross_corpus_results']['uar']['std']:.4f}"
+    )
+    print(
+        f"IEMOCAP WA: {final_results['iemocap_results']['wa']['mean']:.4f} ± {final_results['iemocap_results']['wa']['std']:.4f}"
+    )
+
+    return final_results
+
+
+def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(
+        description="Emotion Recognition with Curriculum Learning"
+    )
+    parser.add_argument(
+        "--difficulty-method",
+        type=str,
+        default="original",
+        choices=[
+            "original",
+            "preset",
+            "pearson_correlation",
+            "spearman_correlation",
+            "euclidean_distance",
+            "weighted_vad_valence",
+            "weighted_vad_balanced",
+            "weighted_vad_arousal",
+        ],
+        help="Difficulty calculation method",
+    )
+    parser.add_argument(
+        "--curriculum-epochs",
+        type=int,
+        default=15,
+        help="Number of curriculum learning epochs",
+    )
+    parser.add_argument(
+        "--curriculum-pacing",
+        type=str,
+        default="exponential",
+        choices=["linear", "exponential", "logarithmic"],
+        help="Curriculum pacing function",
+    )
+    parser.add_argument(
+        "--use-speaker-disentanglement",
+        action="store_true",
+        help="Use speaker disentanglement",
+    )
+    parser.add_argument(
+        "--single-session",
+        type=int,
+        default=5,
+        help="Test on single session (default: 5)",
+    )
+    parser.add_argument(
+        "--experiment-name", type=str, default=None, help="Experiment name for wandb"
+    )
+    parser.add_argument("--batch-size", type=int, default=20, help="Batch size")
+    parser.add_argument(
+        "--learning-rate", type=float, default=2e-4, help="Learning rate"
+    )
+
+    args = parser.parse_args()
+
+    # Create config
+    config = Config()
+    config.curriculum_epochs = args.curriculum_epochs
+    config.curriculum_pacing = args.curriculum_pacing
+    config.use_speaker_disentanglement = args.use_speaker_disentanglement
+    config.single_test_session = args.single_session
+    config.batch_size = args.batch_size
+    config.learning_rate = args.learning_rate
+
+    # Load datasets once
+    print("Loading datasets...")
+    iemocap_dataset = EmotionDataset("IEMOCAP", split="train")
+    msp_dataset = EmotionDataset("MSP-IMPROV", split="train")
+
+    # Set VAD weights based on method
+    vad_weights = None
+    if args.difficulty_method == "weighted_vad_valence":
+        vad_weights = [0.5, 0.4, 0.1]
+    elif args.difficulty_method == "weighted_vad_balanced":
+        vad_weights = [0.4, 0.4, 0.2]
+    elif args.difficulty_method == "weighted_vad_arousal":
+        vad_weights = [0.4, 0.5, 0.1]
+
+    # Run experiment
+    results = run_single_experiment(
+        config,
+        iemocap_dataset,
+        msp_dataset,
+        difficulty_method=args.difficulty_method,
+        vad_weights=vad_weights,
+        experiment_name=args.experiment_name,
+    )
+
+    return results
 
 
 if __name__ == "__main__":

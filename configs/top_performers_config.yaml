@@ -1,0 +1,128 @@
+# Top Performers Ablation Configuration
+# Comparing best methods with and without speaker disentanglement
+
+study_name: "top_performers_comparison"
+wandb_project: "emotion2vec_top_performers_V2"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  learning_rate: 3e-3
+  weight_decay: 1e-4
+  lr_scheduler: "cosine"  # Default to cosine (original behavior)
+  
+  # Class weights (critical for performance!)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Curriculum learning
+  use_curriculum_learning: true
+  curriculum_epochs: 15
+  curriculum_pacing: "exponential"
+  
+  # Other settings
+  use_speaker_disentanglement: false
+  single_test_session: 5  # Test only on session 5 for speed
+
+# Experiment definitions
+experiments:
+  # 1. Original Difficulty (Baseline) - Current best performer
+  - id: "original_baseline"
+    name: "Original Difficulty (Baseline)"
+    difficulty_method: "original"
+    description: "Best overall performer - WA: 0.7155, UAR: 0.6858, Cross-UAR: 0.4520"
+    category: "baseline"
+    
+  - id: "original_baseline_speaker"
+    name: "Original Difficulty + Speaker"
+    difficulty_method: "original"
+    use_speaker_disentanglement: true
+    description: "Original baseline with speaker disentanglement"
+    category: "baseline_speaker"
+
+  # 2. Valence-Heavy Baseline - 2nd best overall
+  - id: "valence_heavy_baseline"
+    name: "Valence-Heavy Baseline"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "2nd best - WA: 0.6975, UAR: 0.6617, Cross-UAR: 0.4660"
+    category: "baseline_quadratic"
+    
+  - id: "valence_heavy_baseline_speaker"
+    name: "Valence-Heavy Baseline + Speaker"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    use_speaker_disentanglement: true
+    description: "Valence-heavy baseline with speaker disentanglement"
+    category: "baseline_quadratic_speaker"
+
+  # 3. Euclidean + Speaker - 3rd best overall (already includes speaker)
+  - id: "euclidean_distance"
+    name: "Euclidean Distance"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean without speaker (for comparison)"
+    category: "distance"
+    
+  - id: "euclidean_speaker"
+    name: "Euclidean + Speaker"
+    difficulty_method: "euclidean_distance"
+    use_speaker_disentanglement: true
+    description: "3rd best - WA: 0.6964, UAR: 0.6783, Cross-UAR: 0.4762"
+    category: "distance_speaker"
+
+  # 4. NEW: Preset Curriculum - Test expert-defined difficulty
+  - id: "preset_curriculum"
+    name: "Preset Curriculum Order"
+    difficulty_method: "preset"
+    description: "Expert-defined curriculum using curriculum_order column"
+    category: "preset"
+    
+  - id: "preset_curriculum_speaker"
+    name: "Preset Curriculum + Speaker"
+    difficulty_method: "preset"
+    use_speaker_disentanglement: true
+    description: "Expert-defined curriculum with speaker disentanglement"
+    category: "preset_speaker"
+
+# Results tracking
+expected_results:
+  # Current best performers for reference
+  original_baseline:
+    iemocap_wa: 0.7155
+    iemocap_uar: 0.6858
+    cross_uar: 0.4520
+    
+  valence_heavy_baseline:
+    iemocap_wa: 0.6975
+    iemocap_uar: 0.6617
+    cross_uar: 0.4660
+    
+  euclidean_speaker:
+    iemocap_wa: 0.6964
+    iemocap_uar: 0.6783
+    cross_uar: 0.4762
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"  # Primary metric for ranking
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  # Performance thresholds
+  thresholds:
+    excellent_wa: 0.70    # WA >= 70% is excellent
+    good_wa: 0.67         # WA >= 65% is good
+    excellent_cross: 0.45 # Cross-UAR >= 45% is excellent
+    good_cross: 0.43      # Cross-UAR >= 40% is good
+
+# Estimated runtime
+estimated_runtime:
+  total_experiments: 8
+  minutes_per_experiment: 42
+  total_hours: 5.6

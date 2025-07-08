@@ -1,0 +1,150 @@
+# ReduceLROnPlateau vs No Scheduler for Top 3 Methods
+# Quick comparison to see if adaptive LR scheduling helps
+
+study_name: "reduce_lr_plateau_test"
+wandb_project: "emotion2vec_plateau_scheduler"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  learning_rate: 3e-4
+  weight_decay: 1e-4
+  lr_scheduler: "cosine"  # Default to cosine (original behavior)
+  
+  # Class weights (current best)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Curriculum learning
+  use_curriculum_learning: true
+  curriculum_epochs: 15
+  curriculum_pacing: "exponential"
+  
+  # Other settings
+  use_speaker_disentanglement: false
+  single_test_session: 5
+
+# Experiment definitions - Testing ReduceLROnPlateau vs No Scheduler
+experiments:
+  # ========================================
+  # 1. ORIGINAL DIFFICULTY BASELINE
+  # ========================================
+  
+  - id: "original_cosine_scheduler"
+    name: "Original - Cosine Scheduler"
+    difficulty_method: "original"
+    description: "Original baseline with cosine annealing (original behavior)"
+    category: "original"
+    lr_scheduler: "cosine"
+
+  - id: "original_plateau_scheduler"
+    name: "Original - ReduceLROnPlateau"
+    difficulty_method: "original"
+    description: "Original baseline with ReduceLROnPlateau scheduler"
+    category: "original"
+    lr_scheduler: "plateau"
+
+  - id: "original_plateau_speaker"
+    name: "Original + Speaker - ReduceLROnPlateau"
+    difficulty_method: "original"
+    description: "Original with speaker + ReduceLROnPlateau"
+    category: "original_speaker"
+    lr_scheduler: "plateau"
+    use_speaker_disentanglement: true
+
+  # ========================================
+  # 2. VALENCE-HEAVY BASELINE
+  # ========================================
+  
+  - id: "valence_heavy_no_scheduler"
+    name: "Valence-Heavy - No Scheduler"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy baseline with constant learning rate"
+    category: "valence_heavy"
+    lr_scheduler: null
+
+  - id: "valence_heavy_plateau_scheduler"
+    name: "Valence-Heavy - ReduceLROnPlateau"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy baseline with ReduceLROnPlateau scheduler"
+    category: "valence_heavy"
+    lr_scheduler: "plateau"
+
+  - id: "valence_heavy_plateau_speaker"
+    name: "Valence-Heavy + Speaker - ReduceLROnPlateau"
+    difficulty_method: "baseline_quadratic"
+    vad_weights: [0.6, 0.25, 0.15]
+    description: "Valence-heavy with speaker + ReduceLROnPlateau"
+    category: "valence_heavy_speaker"
+    lr_scheduler: "plateau"
+    use_speaker_disentanglement: true
+
+  # ========================================
+  # 3. EUCLIDEAN DISTANCE
+  # ========================================
+  
+  - id: "euclidean_no_scheduler"
+    name: "Euclidean - No Scheduler"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean baseline with constant learning rate"
+    category: "euclidean"
+    lr_scheduler: null
+
+  - id: "euclidean_plateau_scheduler"
+    name: "Euclidean - ReduceLROnPlateau"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean baseline with ReduceLROnPlateau scheduler"
+    category: "euclidean"
+    lr_scheduler: "plateau"
+
+  - id: "euclidean_plateau_speaker"
+    name: "Euclidean + Speaker - ReduceLROnPlateau"
+    difficulty_method: "euclidean_distance"
+    description: "Euclidean with speaker + ReduceLROnPlateau"
+    category: "euclidean_speaker"
+    lr_scheduler: "plateau"
+    use_speaker_disentanglement: true
+
+# Expected results for comparison (from previous runs)
+expected_results:
+  original_baseline_reference:
+    iemocap_wa: 0.6996
+    iemocap_uar: 0.6705
+    cross_uar: 0.4367
+    
+  valence_heavy_reference:
+    iemocap_wa: 0.6868
+    iemocap_uar: 0.6723
+    cross_uar: 0.4332
+    
+  euclidean_reference:
+    iemocap_wa: 0.6815
+    iemocap_uar: 0.6490
+    cross_uar: 0.4169
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  # Performance thresholds
+  thresholds:
+    excellent_wa: 0.70
+    good_wa: 0.65
+    excellent_cross: 0.45
+    good_cross: 0.40
+
+# Estimated runtime
+estimated_runtime:
+  total_experiments: 9
+  minutes_per_experiment: 42
+  total_hours: 6.3
