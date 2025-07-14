@@ -1,0 +1,365 @@
+# Breakthrough 71% WA Ablation Study
+# Aggressive strategies to break the 68% barrier and reach 71%+ target
+# Based on emotion2vec paper claiming 70% with simple linear classifier
+
+study_name: "breakthrough_71_ablation"
+wandb_project: "emotion2vec_breakthrough_71"
+
+# Base configuration for all experiments
+base_config:
+  # Extended training for better convergence
+  num_epochs: 80
+  batch_size: 16  # Smaller batches for better gradients
+  
+  # Base setup - will be overridden per experiment
+  use_curriculum_learning: false
+  use_speaker_disentanglement: false
+  difficulty_method: "original"
+  curriculum_epochs: 30  # Longer curriculum
+  
+  # FULL EVALUATION - ALL SESSIONS
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # HYPOTHESIS 1: FEATURE REPRESENTATION IMPROVEMENTS
+  # The issue might be how we process emotion2vec features
+  # ========================================
+  
+  - id: "feat_normalization_l2"
+    name: "FEAT: L2 Normalization"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.03
+      feature_normalization: "l2"  # Add L2 normalization
+    description: "L2 normalize emotion2vec features before classification"
+    category: "feature_engineering"
+
+  - id: "feat_dropout_heavy"
+    name: "FEAT: Heavy Feature Dropout"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4  # Much higher dropout
+      input_dropout: 0.2  # Dropout on input features
+    description: "Heavy regularization with feature and classifier dropout"
+    category: "feature_engineering"
+
+  - id: "feat_multi_pooling"
+    name: "FEAT: Multi-Scale Pooling"
+    learning_rate: 1.5e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 768
+      pooling: "multi_scale"  # Combine multiple pooling strategies
+      layer_norm: true
+      dropout: 0.1
+    description: "Combine mean, max, and attention pooling"
+    category: "feature_engineering"
+
+  # ========================================
+  # HYPOTHESIS 2: TRAINING DYNAMICS OPTIMIZATION
+  # Better optimization and longer training
+  # ========================================
+  
+  - id: "train_cosine_warmup"
+    name: "TRAIN: Cosine + Warmup"
+    learning_rate: 5e-4  # Higher initial LR with warmup
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine_warmup"  # Add warmup phase
+    warmup_epochs: 10
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Cosine annealing with 10-epoch warmup"
+    category: "training_dynamics"
+
+  - id: "train_longer_curriculum"
+    name: "TRAIN: Extended Curriculum"
+    learning_rate: 2e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 50  # Much longer curriculum
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Extended 50-epoch curriculum learning"
+    category: "training_dynamics"
+
+  - id: "train_adam_to_sgd"
+    name: "TRAIN: Adam→SGD Switch"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    optimizer_switch: true  # Switch from Adam to SGD mid-training
+    switch_epoch: 40
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Adam for 40 epochs, then switch to SGD for fine-tuning"
+    category: "training_dynamics"
+
+  # ========================================
+  # HYPOTHESIS 3: EXTREME CLASS REBALANCING
+  # The emotion2vec paper might have different class distributions
+  # ========================================
+  
+  - id: "class_extreme_happy"
+    name: "CLASS: Extreme Happy Boost"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.5  # Heavily downweight majority class
+      happy: 5.0    # Extreme boost for happy
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Extreme rebalancing focusing on happy detection"
+    category: "class_rebalancing"
+
+  - id: "class_focal_loss_heavy"
+    name: "CLASS: Heavy Focal Loss"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    focal_loss: true
+    focal_alpha: 0.5
+    focal_gamma: 3.0  # Strong focal loss
+    class_weights:
+      neutral: 0.7
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Strong focal loss to handle class imbalance"
+    category: "class_rebalancing"
+
+  # ========================================
+  # HYPOTHESIS 4: ARCHITECTURAL IMPROVEMENTS
+  # Better classifier architectures
+  # ========================================
+  
+  - id: "arch_transformer_deep"
+    name: "ARCH: Deep Transformer"
+    learning_rate: 1e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "transformer"
+      hidden_dim: 768
+      num_layers: 6  # Deeper transformer
+      num_heads: 12
+      pooling: "cls_token"
+      layer_norm: true
+      dropout: 0.1
+    description: "Deep 6-layer transformer classifier"
+    category: "architecture"
+
+  - id: "arch_residual_mlp"
+    name: "ARCH: Residual MLP"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "residual_mlp"
+      hidden_dim: 1024
+      num_layers: 4
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.1
+      residual_connections: true
+    description: "Deep MLP with residual connections"
+    category: "architecture"
+
+  # ========================================
+  # HYPOTHESIS 5: ENSEMBLE AND COMBINATION STRATEGIES
+  # ========================================
+  
+  - id: "ensemble_best_combo"
+    name: "ENSEMBLE: Best Features Combined"
+    learning_rate: 1.5e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 40
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.6
+      happy: 4.0
+      sad: 2.0
+      anger: 1.8
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.03
+      feature_normalization: "l2"
+      input_dropout: 0.1
+    description: "Combine all best techniques: L2 norm + extreme weights + long curriculum"
+    category: "ensemble"
+
+  - id: "ultra_aggressive"
+    name: "ULTRA: Maximum Optimization"
+    learning_rate: 3e-4
+    weight_decay: 1e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 60  # Very long curriculum
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.4  # Extreme downweight
+      happy: 6.0    # Extreme upweight
+      sad: 2.5
+      anger: 2.2
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048  # Much larger
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.02  # Very low dropout
+    description: "Maximum aggressive optimization for 71%+ target"
+    category: "ultra_aggressive"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  target_wa: 0.71
+  
+  research_questions:
+    - "Can feature engineering break the 68% barrier?"
+    - "Does extended training improve convergence to 71%?"
+    - "Are we under-weighting minority classes too much?"
+    - "Can deeper architectures capture better representations?"
+    - "What's the optimal curriculum length for 71% performance?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 12
+  minutes_per_experiment: 240  # 4 hours per experiment (80 epochs)
+  total_hours: 48  # 2 days
+
+# Breakthrough targets
+breakthrough_targets:
+  current_ceiling: 0.685
+  target_wa: 0.710
+  top_candidates:
+    - "ultra_aggressive"
+    - "ensemble_best_combo"
+    - "feat_multi_pooling"
+    - "class_extreme_happy"
+    - "train_longer_curriculum"

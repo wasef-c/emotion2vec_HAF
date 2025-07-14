@@ -94,6 +94,10 @@ class EmotionDataset(Dataset):
         else:
             raise ValueError(f"Unknown dataset: {dataset_name}")
 
+        # Track speaker IDs and sessions for debugging
+        speaker_ids_seen = set()
+        session_speaker_mapping = {}
+        
         # Process each item
         for item in hf_dataset:
             # Create session from speaker_id for LOSO
@@ -102,6 +106,12 @@ class EmotionDataset(Dataset):
             if speaker_id is not None:
                 # Map speaker_id to session: speakers 1&2→session 1, 3&4→session 2, etc.
                 session = (speaker_id - 1) // 2 + 1
+                
+                # Debug tracking
+                speaker_ids_seen.add(speaker_id)
+                if session not in session_speaker_mapping:
+                    session_speaker_mapping[session] = set()
+                session_speaker_mapping[session].add(speaker_id)
 
             # Resample audio to 16kHz if needed (like original)
             audio_array = item["audio"]["array"]
@@ -147,6 +157,21 @@ class EmotionDataset(Dataset):
             self.data.append(processed_item)
 
         print(f"Loaded {len(self.data)} samples from {dataset_name}")
+        
+        # Debug: Print speaker ID and session mapping
+        print(f"🔍 DEBUG - Speaker IDs found: {sorted(speaker_ids_seen)}")
+        print(f"🔍 DEBUG - Total unique speakers: {len(speaker_ids_seen)}")
+        print(f"🔍 DEBUG - Session mapping:")
+        for session in sorted(session_speaker_mapping.keys()):
+            speakers = sorted(session_speaker_mapping[session])
+            print(f"   Session {session}: Speakers {speakers}")
+        print(f"🔍 DEBUG - Total sessions created: {len(session_speaker_mapping)}")
+        
+        # Verify IEMOCAP should have exactly 5 sessions
+        if dataset_name == "IEMOCAP" and len(session_speaker_mapping) != 5:
+            print(f"⚠️  WARNING: IEMOCAP should have 5 sessions, but found {len(session_speaker_mapping)} sessions!")
+            print(f"⚠️  Expected speakers 1-10 → sessions 1-5")
+            print(f"⚠️  Actual speakers: {sorted(speaker_ids_seen)}")
 
     def __len__(self):
         return len(self.data)
@@ -171,7 +196,7 @@ class EmotionDataset(Dataset):
         }
 
     def extract_features(self, audio_array):
-        """Extract frame-level features using emotion2vec base model."""
+        """Extract utterance-level features using emotion2vec base model."""
         # Ensure audio is float32 tensor
         if not isinstance(audio_array, torch.Tensor):
             audio_array = torch.tensor(audio_array, dtype=torch.float32)
@@ -187,11 +212,11 @@ class EmotionDataset(Dataset):
         sys.stderr = StringIO()
 
         try:
-            # Generate frame-level features using emotion2vec base model
+            # Generate utterance-level features using emotion2vec base model
             rec_result = self.emotion2vec_model.generate(
                 audio_array,
                 output_dir=None,
-                granularity="frame",  # Get frame-level features like original
+                granularity="utterance",  # Get utterance-level features to match precomputed
                 extract_embedding=True,
                 sr=16000,
             )
@@ -200,10 +225,10 @@ class EmotionDataset(Dataset):
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-        # Get frame-level features [T, EMOTION2VEC_DIM] like original
-        frame_features = torch.from_numpy(rec_result[0]["feats"]).float()
+        # Get utterance-level features [EMOTION2VEC_DIM] to match precomputed
+        utterance_features = torch.from_numpy(rec_result[0]["feats"]).float()
 
-        return frame_features  # Shape: [T, EMOTION2VEC_DIM]
+        return utterance_features  # Shape: [EMOTION2VEC_DIM] to match precomputed
 
 
 def collate_fn(batch):
@@ -308,10 +333,11 @@ class CurriculumSampler(Sampler):
         self.sorted_indices = [pair[0] for pair in sorted_pairs]
         self.sorted_difficulties = [pair[1] for pair in sorted_pairs]
 
-        # Set adaptive thresholds
+        # Set smoother quantile-based progression
         if self.sorted_difficulties:
-            self.start_threshold = np.percentile(self.sorted_difficulties, 20)
-            self.end_threshold = np.percentile(self.sorted_difficulties, 95)
+            # Start with easiest 10% and gradually grow to 100%
+            self.start_percentile = 10  # Start with easiest 10%
+            self.end_percentile = 100   # End with all samples
         else:
             self.start_threshold = 0.2
             self.end_threshold = 0.8
@@ -338,16 +364,31 @@ class CurriculumSampler(Sampler):
         if self.current_epoch >= self.curriculum_epochs:
             valid_indices = self.all_indices.copy()
         else:
-            current_threshold = (
-                self.start_threshold
-                + (self.end_threshold - self.start_threshold) * progress
-            )
+            if hasattr(self, 'start_percentile'):
+                # Smooth quantile-based progression
+                current_percentile = (
+                    self.start_percentile + 
+                    (self.end_percentile - self.start_percentile) * progress
+                )
+                
+                # Calculate how many samples to include (smooth growth)
+                total_samples = len(self.sorted_indices)
+                num_samples_to_include = int((current_percentile / 100.0) * total_samples)
+                
+                # Take the easiest N samples (they're already sorted by difficulty)
+                valid_indices = self.sorted_indices[:num_samples_to_include]
+            else:
+                # Fallback to threshold-based approach
+                current_threshold = (
+                    self.start_threshold
+                    + (self.end_threshold - self.start_threshold) * progress
+                )
 
-            valid_indices = [
-                idx
-                for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
-                if diff <= current_threshold
-            ]
+                valid_indices = [
+                    idx
+                    for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
+                    if diff <= current_threshold
+                ]
 
             # Ensure we have enough samples
             if len(valid_indices) < self.batch_size:
@@ -530,16 +571,30 @@ class CurriculumSpeakerSampler(CurriculumSampler):
             # After curriculum: use all samples with speaker disentanglement
             valid_indices = self.all_indices.copy()
         else:
-            # During curriculum: apply difficulty threshold
-            current_threshold = (
-                self.start_threshold + 
-                (self.end_threshold - self.start_threshold) * progress
-            )
-            
-            valid_indices = [
-                idx for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
-                if diff <= current_threshold
-            ]
+            if hasattr(self, 'start_percentile'):
+                # Smooth quantile-based progression
+                current_percentile = (
+                    self.start_percentile + 
+                    (self.end_percentile - self.start_percentile) * progress
+                )
+                
+                # Calculate how many samples to include (smooth growth)
+                total_samples = len(self.sorted_indices)
+                num_samples_to_include = int((current_percentile / 100.0) * total_samples)
+                
+                # Take the easiest N samples (they're already sorted by difficulty)
+                valid_indices = self.sorted_indices[:num_samples_to_include]
+            else:
+                # Fallback: During curriculum: apply difficulty threshold
+                current_threshold = (
+                    self.start_threshold + 
+                    (self.end_threshold - self.start_threshold) * progress
+                )
+                
+                valid_indices = [
+                    idx for idx, diff in zip(self.sorted_indices, self.sorted_difficulties)
+                    if diff <= current_threshold
+                ]
         
         # Group valid indices by speaker
         speaker_valid_indices = {}
@@ -815,27 +870,49 @@ class AdaptiveSaliencyLoss(nn.Module):
         use_focal_loss=True,
         focal_alpha=0.25,
         focal_gamma=2.0,
+        label_smoothing=0.0,
     ):
         super().__init__()
         self.use_focal_loss = use_focal_loss
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
+        self.label_smoothing = label_smoothing
 
         if use_focal_loss:
             # Focal loss handles imbalance better than weighted CE
             self.emotion_loss = self.focal_loss
         else:
-            self.emotion_loss = nn.CrossEntropyLoss(weight=class_weights)
+            self.emotion_loss = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
 
         self.saliency_weight = saliency_weight  # Reduced from 0.1
         self.diversity_weight = diversity_weight  # Reduced from 0.05
         self.class_weights = class_weights
 
     def focal_loss(self, logits, targets):
-        """Focal Loss for addressing class imbalance."""
-        ce_loss = F.cross_entropy(
-            logits, targets, weight=self.class_weights, reduction="none"
-        )
+        """Focal Loss for addressing class imbalance with optional label smoothing."""
+        # Apply manual label smoothing if specified
+        if self.label_smoothing > 0:
+            # Create smooth labels
+            num_classes = logits.size(-1)
+            smooth_targets = torch.zeros_like(logits)
+            smooth_targets.fill_(self.label_smoothing / (num_classes - 1))
+            smooth_targets.scatter_(1, targets.unsqueeze(1), 1.0 - self.label_smoothing)
+            
+            # Calculate cross entropy with smooth labels manually
+            log_probs = F.log_softmax(logits, dim=-1)
+            ce_loss = -(smooth_targets * log_probs).sum(dim=-1)
+            
+            # Apply class weights manually if provided
+            if self.class_weights is not None:
+                weight_mask = self.class_weights[targets]
+                ce_loss = ce_loss * weight_mask
+        else:
+            # Standard cross entropy for focal loss
+            ce_loss = F.cross_entropy(
+                logits, targets, weight=self.class_weights, reduction="none"
+            )
+        
+        # Calculate focal weight
         pt = torch.exp(-ce_loss)
         focal_loss = self.focal_alpha * (1 - pt) ** self.focal_gamma * ce_loss
         return focal_loss.mean()
@@ -1308,12 +1385,13 @@ def train_epoch(model, dataloader, criterion, optimizer, device, epoch):
     return metrics
 
 
-def evaluate(model, dataloader, criterion, device):
+def evaluate(model, dataloader, criterion, device, return_predictions=False):
     """Evaluate model"""
     model.eval()
     total_loss = 0
     all_preds = []
     all_labels = []
+    all_speaker_ids = []
 
     with torch.no_grad():
         for batch in dataloader:
@@ -1329,6 +1407,7 @@ def evaluate(model, dataloader, criterion, device):
             preds = torch.argmax(outputs["logits"], dim=1).cpu().numpy()
             all_preds.extend(preds)
             all_labels.extend(labels.cpu().numpy())
+            all_speaker_ids.extend(speaker_ids.cpu().numpy() if hasattr(speaker_ids, 'cpu') else speaker_ids)
 
     # Show prediction distribution
     pred_counts = {}
@@ -1344,6 +1423,8 @@ def evaluate(model, dataloader, criterion, device):
     metrics = calculate_metrics(all_labels, all_preds)
     metrics["loss"] = total_loss / len(dataloader)
 
+    if return_predictions:
+        return metrics, all_preds, all_labels, all_speaker_ids
     return metrics
 
 

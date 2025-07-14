@@ -1,0 +1,215 @@
+# Curriculum Pacing Ablation Study - FIXED VERSION
+# All experiments use EXACT same config except curriculum pacing
+
+study_name: "curriculum_pacing_ablation_fixed"
+wandb_project: "emotion2vec_curriculum_pacing_fixed"
+
+# Template config that achieved 70.8% - ALL experiments inherit this
+template_config: &template
+  learning_rate: 9e-5
+  weight_decay: 5e-6
+  use_curriculum_learning: true
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  lr_scheduler: "cosine"
+  focal_loss: true
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  label_smoothing: 0.1
+  num_epochs: 80
+  batch_size: 16
+  class_weights:
+    neutral: 0.8
+    happy: 3.5
+    sad: 1.8
+    anger: 1.6
+  classifier_config:
+    architecture: "simple"
+    hidden_dim: 1536
+    pooling: "attention"
+    layer_norm: true
+    dropout: 0.4
+    input_dropout: 0.2
+
+experiments:
+  # ========================================
+  # BASELINE
+  # ========================================
+  
+  - <<: *template
+    id: "baseline_30_epochs"
+    name: "Baseline (30 epoch curriculum)"
+    curriculum_epochs: 30
+    description: "Exact replica of label_smoothing config that achieved 70.8%"
+    category: "baseline"
+
+  # ========================================
+  # SHORTER CURRICULUM PACING
+  # ========================================
+  
+  - <<: *template
+    id: "short_curriculum_15"
+    name: "Short Curriculum (15 epochs)"
+    curriculum_epochs: 15
+    description: "Faster transition to full difficulty"
+    category: "short_pacing"
+
+  - <<: *template
+    id: "short_curriculum_20"
+    name: "Short Curriculum (20 epochs)"
+    curriculum_epochs: 20
+    description: "Moderate fast transition"
+    category: "short_pacing"
+
+  # ========================================
+  # LONGER CURRICULUM PACING
+  # ========================================
+  
+  - <<: *template
+    id: "long_curriculum_40"
+    name: "Long Curriculum (40 epochs)"
+    curriculum_epochs: 40
+    description: "Slower, more gradual difficulty increase"
+    category: "long_pacing"
+
+  - <<: *template
+    id: "long_curriculum_50"
+    name: "Long Curriculum (50 epochs)"
+    curriculum_epochs: 50
+    description: "Very gradual curriculum progression"
+    category: "long_pacing"
+
+  - <<: *template
+    id: "extended_curriculum_60"
+    name: "Extended Curriculum (60 epochs)"
+    curriculum_epochs: 60
+    description: "Curriculum for most of training"
+    category: "long_pacing"
+
+  # ========================================
+  # NON-LINEAR PACING STRATEGIES
+  # ========================================
+  
+  - <<: *template
+    id: "exponential_pacing"
+    name: "Exponential Pacing"
+    curriculum_epochs: 30
+    curriculum_pacing: "exponential"
+    description: "Exponential difficulty curve"
+    category: "nonlinear_pacing"
+
+  - <<: *template
+    id: "logarithmic_pacing"
+    name: "Logarithmic Pacing"
+    curriculum_epochs: 30
+    curriculum_pacing: "logarithmic"
+    description: "Logarithmic difficulty curve"
+    category: "nonlinear_pacing"
+
+  - <<: *template
+    id: "sigmoid_pacing"
+    name: "Sigmoid Pacing"
+    curriculum_epochs: 35
+    curriculum_pacing: "sigmoid"
+    description: "S-curve difficulty progression"
+    category: "nonlinear_pacing"
+
+  # ========================================
+  # STEPPED CURRICULUM STRATEGIES
+  # ========================================
+  
+  - <<: *template
+    id: "three_step_curriculum"
+    name: "Three-Step Curriculum"
+    curriculum_strategy: "stepped"
+    curriculum_steps:
+      - epochs: 15
+        difficulty_threshold: 0.3
+      - epochs: 25
+        difficulty_threshold: 0.6
+      - epochs: 40
+        difficulty_threshold: 1.0
+    description: "Three discrete difficulty steps"
+    category: "stepped_pacing"
+
+  - <<: *template
+    id: "five_step_curriculum"
+    name: "Five-Step Curriculum"
+    curriculum_strategy: "stepped"
+    curriculum_steps:
+      - epochs: 10
+        difficulty_threshold: 0.2
+      - epochs: 20
+        difficulty_threshold: 0.4
+      - epochs: 30
+        difficulty_threshold: 0.6
+      - epochs: 40
+        difficulty_threshold: 0.8
+      - epochs: 50
+        difficulty_threshold: 1.0
+    description: "Five discrete difficulty steps"
+    category: "stepped_pacing"
+
+  # ========================================
+  # ADAPTIVE PACING STRATEGIES
+  # ========================================
+  
+  - <<: *template
+    id: "performance_adaptive"
+    name: "Performance-Adaptive Pacing"
+    curriculum_strategy: "adaptive"
+    adaptive_config:
+      metric: "train_accuracy"
+      threshold_advance: 0.7
+      threshold_plateau: 0.05
+      min_epochs_per_stage: 8
+    description: "Adapt pacing based on training performance"
+    category: "adaptive_pacing"
+
+  - <<: *template
+    id: "loss_adaptive"
+    name: "Loss-Adaptive Pacing"
+    curriculum_strategy: "adaptive"
+    adaptive_config:
+      metric: "train_loss"
+      threshold_advance: 0.5
+      patience: 5
+      min_epochs_per_stage: 10
+    description: "Adapt pacing based on training loss"
+    category: "adaptive_pacing"
+
+  # ========================================
+  # ALTERNATIVE STRATEGIES
+  # ========================================
+  
+  - <<: *template
+    id: "reverse_curriculum"
+    name: "Reverse Curriculum"
+    curriculum_strategy: "reverse"
+    curriculum_epochs: 30
+    description: "Start with hard samples, end with easy"
+    category: "alternative_pacing"
+
+  - <<: *template
+    id: "cyclic_curriculum"
+    name: "Cyclic Curriculum"
+    curriculum_strategy: "cyclic"
+    cycle_length: 20
+    num_cycles: 3
+    description: "Cycle between easy and hard samples"
+    category: "alternative_pacing"
+
+analysis:
+  primary_metric: "iemocap_wa"
+  baseline_wa: 0.708
+  target_wa: 0.72
+  
+  research_questions:
+    - "What is the optimal curriculum pacing for this dataset?"
+    - "Does slower or faster curriculum progression work better?"
+    - "Can non-linear pacing strategies outperform linear?"
+
+estimated_runtime:
+  total_experiments: 15
+  minutes_per_experiment: 240
+  total_hours: 60

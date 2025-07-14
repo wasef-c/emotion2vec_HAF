@@ -1,0 +1,87 @@
+# Baseline Test with Precomputed Features
+# Reproduce the exact 70.8% WA baseline using precomputed utterance-level features
+
+study_name: "baseline_precomputed_test"
+wandb_project: "emotion2vec_baseline_test"
+
+# Base configuration - EXACT 70.8% WA baseline for precomputed features
+base_config:
+  # Core training parameters
+  num_epochs: 80
+  batch_size: 16
+  learning_rate: 9e-5
+  weight_decay: 5e-6
+  lr_scheduler: "cosine"
+  
+  # Model architecture (fixed to working config)
+  use_speaker_disentanglement: true
+  use_curriculum_learning: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 30
+  
+  # Loss configuration
+  focal_loss: true
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  label_smoothing: 0.1
+  
+  # Class weights (optimized)
+  class_weights:
+    neutral: 0.8
+    happy: 3.5
+    sad: 1.8
+    anger: 1.6
+  
+  # Classifier config (fixed)
+  classifier_config:
+    architecture: "simple"
+    hidden_dim: 1536
+    pooling: "attention"
+    layer_norm: true
+    dropout: 0.4
+    input_dropout: 0.2
+
+experiments:
+  # ========================================
+  # EXACT BASELINE REPRODUCTION TEST
+  # ========================================
+  
+  - id: "exact_baseline"
+    name: "Exact Baseline Reproduction"
+    learning_rate: 9e-5
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    focal_loss: true
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Exact baseline configuration that should achieve 70.8% WA"
+    category: "baseline"
+
+# Analysis configuration
+analysis:
+  primary_metric: "iemocap_wa"
+  expected_wa: 0.708
+  tolerance: 0.005  # ±0.5% tolerance
+
+# Notes
+notes:
+  - "Uses precomputed utterance-level emotion2vec features"
+  - "Should reproduce exact 70.8% WA baseline"
+  - "All parameters explicitly specified to avoid inheritance issues"

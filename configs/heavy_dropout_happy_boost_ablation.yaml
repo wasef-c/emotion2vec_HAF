@@ -1,0 +1,418 @@
+# Heavy Feature Dropout + Extreme Happy Boost Ablation Study
+# Focused ablation on the two best breakthrough strategies
+# Combining heavy regularization with extreme class rebalancing
+
+study_name: "heavy_dropout_happy_boost_ablation"
+wandb_project: "emotion2vec_dropout_happy_focused"
+
+# Base configuration for all experiments
+base_config:
+  # Extended training for better convergence
+  num_epochs: 80
+  batch_size: 16
+  
+  # CRITICAL: All experiments use curriculum learning (was key to top performers)
+  use_curriculum_learning: true
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 30
+  lr_scheduler: "cosine"
+  
+  # Default class weights (will be overridden per experiment)
+  class_weights:
+    neutral: 0.8
+    happy: 3.5
+    sad: 1.8
+    anger: 1.6
+  
+  # FULL EVALUATION - ALL SESSIONS
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # BASELINE REFERENCE
+  # ========================================
+  
+  - id: "baseline_reference"
+    name: "Baseline Reference"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Baseline with moderate settings + curriculum learning"
+    category: "baseline"
+
+  # ========================================
+  # HEAVY FEATURE DROPOUT VARIATIONS
+  # ========================================
+  
+  - id: "heavy_dropout_v1"
+    name: "Heavy Dropout v1"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4  # Heavy classifier dropout
+      input_dropout: 0.2  # Heavy input dropout
+    description: "Heavy feature + classifier dropout + curriculum learning"
+    category: "heavy_dropout"
+
+  - id: "feat_dropout_heavy"
+    name: "FEAT: Heavy Feature Dropout"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4  # Much higher dropout
+      input_dropout: 0.2  # Dropout on input features
+    description: "Heavy regularization with feature and classifier dropout"
+    category: "feature_engineering"
+
+  - id: "heavy_dropout_v2"
+    name: "Heavy Dropout v2"
+    learning_rate: 8e-5
+    weight_decay: 3e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.5  # Even heavier classifier dropout
+      input_dropout: 0.25  # Even heavier input dropout
+    description: "Even heavier dropout with lower LR"
+    category: "heavy_dropout"
+
+  - id: "heavy_dropout_v3"
+    name: "Heavy Dropout v3"
+    learning_rate: 1.2e-4
+    weight_decay: 5e-6
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048  # Larger network to compensate for dropout
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.3  # Very heavy input dropout
+    description: "Heavy input dropout with larger network"
+    category: "heavy_dropout"
+
+  - id: "heavy_dropout_v4"
+    name: "Heavy Dropout v4"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "multi_scale"  # Use multi-scale pooling
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "l2"  # Add L2 normalization
+    description: "Heavy dropout + multi-scale pooling + L2 norm"
+    category: "heavy_dropout"
+
+  # ========================================
+  # EXTREME HAPPY BOOST VARIATIONS
+  # ========================================
+  
+  - id: "extreme_happy_v1"
+    name: "Extreme Happy v1"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    class_weights:
+      neutral: 0.5  # Heavily downweight majority class
+      happy: 5.0    # Extreme boost for happy (original)
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Extreme happy rebalancing (original best)"
+    category: "extreme_happy"
+
+  - id: "extreme_happy_v2"
+    name: "Extreme Happy v2"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    class_weights:
+      neutral: 0.4  # Even more downweight neutral
+      happy: 6.0    # Even more boost happy
+      sad: 2.2
+      anger: 2.2
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Even more extreme happy boosting"
+    category: "extreme_happy"
+
+  - id: "extreme_happy_v3"
+    name: "Extreme Happy v3"
+    learning_rate: 1.5e-4
+    weight_decay: 1e-5
+    focal_loss: true
+    focal_alpha: 0.5
+    focal_gamma: 3.0  # Strong focal loss
+    class_weights:
+      neutral: 0.6
+      happy: 4.5    # Heavy happy boost with focal loss
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Extreme happy boost + strong focal loss"
+    category: "extreme_happy"
+
+  - id: "extreme_happy_v4"
+    name: "Extreme Happy v4"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    class_weights:
+      neutral: 0.3  # Maximum downweight neutral
+      happy: 7.0    # Maximum boost happy
+      sad: 2.5
+      anger: 2.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536  # Larger network
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Maximum extreme happy boosting with larger network"
+    category: "extreme_happy"
+
+  # ========================================
+  # COMBINED HEAVY DROPOUT + EXTREME HAPPY
+  # ========================================
+  
+  - id: "combo_v1"
+    name: "COMBO: Heavy Dropout + Extreme Happy v1"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    class_weights:
+      neutral: 0.5
+      happy: 5.0    # Extreme happy boost
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4  # Heavy dropout
+      input_dropout: 0.2
+    description: "Combine heavy dropout with extreme happy boost"
+    category: "combination"
+
+  - id: "combo_v2"
+    name: "COMBO: Heavy Dropout + Extreme Happy v2"
+    learning_rate: 8e-5
+    weight_decay: 2e-6
+    class_weights:
+      neutral: 0.4
+      happy: 6.0    # Even more extreme happy boost
+      sad: 2.2
+      anger: 2.2
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.5  # Even heavier dropout
+      input_dropout: 0.25
+    description: "Maximum heavy dropout + maximum happy boost"
+    category: "combination"
+
+  - id: "combo_v3"
+    name: "COMBO: Heavy Dropout + Extreme Happy + Multi-Scale"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    class_weights:
+      neutral: 0.4
+      happy: 6.0
+      sad: 2.2
+      anger: 2.2
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048  # Larger to handle multi-scale
+      pooling: "multi_scale"  # Combine pooling strategies
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "l2"
+    description: "Heavy dropout + extreme happy + multi-scale + L2 norm"
+    category: "combination"
+
+  - id: "combo_v4_focal"
+    name: "COMBO: Heavy Dropout + Extreme Happy + Focal"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    focal_loss: true
+    focal_alpha: 0.5
+    focal_gamma: 3.0
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout + extreme happy + strong focal loss"
+    category: "combination"
+
+  # ========================================
+  # ULTRA OPTIMIZED FINAL CANDIDATES
+  # ========================================
+  
+  - id: "ultra_final_v1"
+    name: "ULTRA FINAL: Maximum Optimization v1"
+    learning_rate: 8e-5
+    weight_decay: 2e-6
+    curriculum_epochs: 40  # Longer curriculum
+    focal_loss: true
+    focal_alpha: 0.6
+    focal_gamma: 3.5
+    class_weights:
+      neutral: 0.3  # Maximum neutral downweight
+      happy: 7.0    # Maximum happy boost
+      sad: 2.5
+      anger: 2.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048
+      pooling: "multi_scale"
+      layer_norm: true
+      dropout: 0.45
+      input_dropout: 0.3
+      feature_normalization: "l2"
+    description: "Maximum everything: dropout + happy + focal + multi-scale"
+    category: "ultra_final"
+
+  - id: "ultra_final_v2"
+    name: "ULTRA FINAL: Maximum Optimization v2"
+    learning_rate: 6e-5
+    weight_decay: 1e-6
+    curriculum_epochs: 50  # Very long curriculum
+    focal_loss: true
+    focal_alpha: 0.7
+    focal_gamma: 4.0  # Maximum focal loss
+    class_weights:
+      neutral: 0.25  # Extreme neutral downweight
+      happy: 8.0     # Extreme happy boost
+      sad: 3.0
+      anger: 3.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048
+      pooling: "multi_scale"
+      layer_norm: true
+      dropout: 0.5   # Maximum dropout
+      input_dropout: 0.35
+      feature_normalization: "l2"
+    description: "Absolute maximum optimization for 71%+ target"
+    category: "ultra_final"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  target_wa: 0.71
+  
+  research_questions:
+    - "What's the optimal dropout level for heavy regularization?"
+    - "How extreme can we make the happy class boost?"
+    - "Do heavy dropout and extreme happy boost work synergistically?"
+    - "Can focal loss further improve the extreme class rebalancing?"
+    - "What combination achieves 71%+ WA?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 15
+  minutes_per_experiment: 240  # 4 hours per experiment (80 epochs)
+  total_hours: 60  # 2.5 days
+
+# Breakthrough targets
+breakthrough_targets:
+  best_individual_strategies:
+    - "feat_heavy_dropout" # Best from previous study
+    - "class_extreme_happy" # Best from previous study
+  target_wa: 0.71
+  top_candidates:
+    - "ultra_final_v2"
+    - "ultra_final_v1"
+    - "combo_v3"
+    - "combo_v2"
+    - "heavy_dropout_v4"

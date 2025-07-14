@@ -1,0 +1,689 @@
+# Comprehensive Simple Architecture Ablation Study
+# Focus on optimizing simple linear classifier to reach emotion2vec paper's 70% performance
+# Systematic testing of all training strategies and hyperparameters
+
+study_name: "simple_comprehensive_ablation"
+wandb_project: "emotion2vec_simple_optimization"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  lr_scheduler: "cosine"
+  
+  # Default class weights (best from previous studies)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Default base setup
+  use_curriculum_learning: false
+  use_speaker_disentanglement: false
+  difficulty_method: "original"
+  curriculum_epochs: 20
+  
+  # Fast testing
+  single_test_session: 5
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # SECTION 1: BASELINE EXPERIMENTS
+  # ========================================
+  
+  - id: "baseline_simple"
+    name: "Baseline Simple"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Pure baseline simple classifier"
+    category: "baseline"
+
+  - id: "baseline_enhanced"
+    name: "Baseline Enhanced"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Enhanced simple classifier (your target config)"
+    category: "baseline"
+
+  # ========================================
+  # SECTION 2: DIFFICULTY METHOD ABLATION
+  # ========================================
+  
+  - id: "diff_preset"
+    name: "Difficulty Preset"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "preset"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Expert-curated curriculum ordering"
+    category: "difficulty_method"
+
+  - id: "diff_baseline_quadratic"
+    name: "Difficulty Baseline Quadratic"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "baseline_quadratic"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Original baseline with quadratic VAD penalties"
+    category: "difficulty_method"
+
+  - id: "diff_pearson"
+    name: "Difficulty Pearson"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Pearson correlation difficulty"
+    category: "difficulty_method"
+
+  - id: "diff_spearman"
+    name: "Difficulty Spearman"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "spearman_correlation"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Spearman correlation difficulty"
+    category: "difficulty_method"
+
+  - id: "diff_euclidean"
+    name: "Difficulty Euclidean"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "euclidean_distance"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Euclidean distance difficulty"
+    category: "difficulty_method"
+
+  - id: "diff_vad_balanced"
+    name: "Difficulty VAD Balanced"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "weighted_vad_balanced"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Weighted VAD balanced [0.4, 0.4, 0.2]"
+    category: "difficulty_method"
+
+  - id: "diff_vad_valence"
+    name: "Difficulty VAD Valence"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "weighted_vad_valence"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Valence-focused VAD [0.5, 0.4, 0.1]"
+    category: "difficulty_method"
+
+  - id: "diff_vad_arousal"
+    name: "Difficulty VAD Arousal"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "weighted_vad_arousal"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Arousal-focused VAD [0.4, 0.5, 0.1]"
+    category: "difficulty_method"
+
+  # ========================================
+  # SECTION 3: SPEAKER DISENTANGLEMENT
+  # ========================================
+  
+  - id: "speaker_disent_only"
+    name: "Speaker Disentanglement Only"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_speaker_disentanglement: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Speaker disentanglement without curriculum"
+    category: "speaker_disentanglement"
+
+  - id: "speaker_disent_plus_preset"
+    name: "Speaker + Preset Curriculum"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "preset"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Speaker disentanglement + preset curriculum"
+    category: "speaker_disentanglement"
+
+  - id: "speaker_disent_plus_euclidean"
+    name: "Speaker + Euclidean Curriculum"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "euclidean_distance"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Speaker disentanglement + euclidean curriculum"
+    category: "speaker_disentanglement"
+
+  # ========================================
+  # SECTION 4: CURRICULUM PACING ABLATION
+  # ========================================
+  
+  - id: "curriculum_epochs_10"
+    name: "Curriculum 10 Epochs"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "preset"
+    curriculum_epochs: 10
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Faster curriculum pacing"
+    category: "curriculum_pacing"
+
+  - id: "curriculum_epochs_15"
+    name: "Curriculum 15 Epochs"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "preset"
+    curriculum_epochs: 15
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Medium curriculum pacing"
+    category: "curriculum_pacing"
+
+  - id: "curriculum_epochs_25"
+    name: "Curriculum 25 Epochs"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "preset"
+    curriculum_epochs: 25
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Slower curriculum pacing"
+    category: "curriculum_pacing"
+
+  # ========================================
+  # SECTION 5: LEARNING RATE OPTIMIZATION
+  # ========================================
+  
+  - id: "lr_1e4"
+    name: "Learning Rate 1e-4"
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Lower learning rate"
+    category: "learning_rate"
+
+  - id: "lr_2e4"
+    name: "Learning Rate 2e-4"
+    learning_rate: 2e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Medium-low learning rate"
+    category: "learning_rate"
+
+  - id: "lr_5e4"
+    name: "Learning Rate 5e-4"
+    learning_rate: 5e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Higher learning rate"
+    category: "learning_rate"
+
+  # ========================================
+  # SECTION 6: WEIGHT DECAY OPTIMIZATION
+  # ========================================
+  
+  - id: "wd_1e5"
+    name: "Weight Decay 1e-5"
+    learning_rate: 3e-4
+    weight_decay: 1e-5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Low weight decay"
+    category: "weight_decay"
+
+  - id: "wd_5e5"
+    name: "Weight Decay 5e-5"
+    learning_rate: 3e-4
+    weight_decay: 5e-5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Medium-low weight decay"
+    category: "weight_decay"
+
+  - id: "wd_5e4"
+    name: "Weight Decay 5e-4"
+    learning_rate: 3e-4
+    weight_decay: 5e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "High weight decay"
+    category: "weight_decay"
+
+  # ========================================
+  # SECTION 7: DROPOUT OPTIMIZATION
+  # ========================================
+  
+  - id: "dropout_01"
+    name: "Dropout 0.1"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Low dropout"
+    category: "dropout"
+
+  - id: "dropout_03"
+    name: "Dropout 0.3"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.3
+    description: "High dropout"
+    category: "dropout"
+
+  # ========================================
+  # SECTION 8: LEARNING RATE SCHEDULER
+  # ========================================
+  
+  - id: "sched_step"
+    name: "Step Scheduler"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    lr_scheduler: "step"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Step decay scheduler"
+    category: "scheduler"
+
+  - id: "sched_exponential"
+    name: "Exponential Scheduler"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    lr_scheduler: "exponential"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Exponential decay scheduler"
+    category: "scheduler"
+
+  - id: "sched_plateau"
+    name: "Plateau Scheduler"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    lr_scheduler: "plateau"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Reduce on plateau scheduler"
+    category: "scheduler"
+
+  - id: "sched_none"
+    name: "No Scheduler"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    lr_scheduler: null
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "No learning rate scheduling"
+    category: "scheduler"
+
+  # ========================================
+  # SECTION 9: CLASS WEIGHT VARIATIONS
+  # ========================================
+  
+  - id: "weights_balanced"
+    name: "Balanced Class Weights"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    class_weights:
+      neutral: 1.0
+      happy: 1.0
+      sad: 1.0
+      anger: 1.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Balanced class weights"
+    category: "class_weights"
+
+  - id: "weights_heavy"
+    name: "Heavy Minority Weights"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    class_weights:
+      neutral: 1.0
+      happy: 3.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Heavy weights for minority classes"
+    category: "class_weights"
+
+  - id: "weights_moderate"
+    name: "Moderate Minority Weights"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    class_weights:
+      neutral: 1.0
+      happy: 2.0
+      sad: 1.3
+      anger: 1.3
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Moderate weights for minority classes"
+    category: "class_weights"
+
+  # ========================================
+  # SECTION 10: SIMPLE ARCHITECTURE VARIATIONS
+  # ========================================
+  
+  - id: "arch_hidden_128"
+    name: "Hidden Dim 128"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 128
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Smaller hidden dimension"
+    category: "architecture"
+
+  - id: "arch_hidden_1024"
+    name: "Hidden Dim 1024"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Larger hidden dimension"
+    category: "architecture"
+
+  - id: "arch_pooling_mean"
+    name: "Mean Pooling"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Simple mean pooling"
+    category: "architecture"
+
+  - id: "arch_pooling_attention"
+    name: "Attention Pooling"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.2
+    description: "Learnable attention pooling"
+    category: "architecture"
+
+  - id: "arch_no_layer_norm"
+    name: "No Layer Norm"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Without layer normalization"
+    category: "architecture"
+
+  # ========================================
+  # SECTION 11: BEST COMBINATIONS
+  # ========================================
+  
+  - id: "best_combo_1"
+    name: "Best Combo: Speaker + Preset + Optimized"
+    learning_rate: 2e-4
+    weight_decay: 5e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "preset"
+    curriculum_epochs: 15
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 1.0
+      happy: 2.0
+      sad: 1.3
+      anger: 1.3
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Best combination for 70% WA target"
+    category: "best_combo"
+
+  - id: "best_combo_2"
+    name: "Best Combo: Euclidean + Speaker + Optimized"
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "euclidean_distance"
+    curriculum_epochs: 20
+    lr_scheduler: "plateau"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.1
+    description: "Alternative best combination"
+    category: "best_combo"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  research_questions:
+    - "Which difficulty calculation method works best?"
+    - "Does speaker disentanglement improve performance?"
+    - "What is the optimal curriculum pacing?"
+    - "What learning rate and weight decay achieve best results?"
+    - "Which class weighting strategy is most effective?"
+    - "How do simple architecture variations affect performance?"
+    - "Can we reach emotion2vec paper's 70% WA with optimized simple classifier?"
+    - "What is the best combination of all training strategies?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 33
+  minutes_per_experiment: 45
+  total_hours: 24.75
+
+# Expected improvements
+expected_results:
+  baseline_wa: 0.60  # Current simple classifier
+  target_wa: 0.70   # emotion2vec paper target
+  key_factors:
+    - "Difficulty calculation method optimization"
+    - "Speaker disentanglement benefits"
+    - "Curriculum learning improvements"
+    - "Hyperparameter optimization"
+    - "Class weight balancing"
+  expected_best_methods:
+    - preset
+    - euclidean_distance
+    - speaker_disentanglement
+    - moderate_class_weights

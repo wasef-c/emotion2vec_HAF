@@ -1,0 +1,379 @@
+# Top 5 Performers Full Ablation Study
+# Based on simple_comprehensive_ablation results - testing the best performers across ALL sessions
+# Goal: Achieve ~70% WA with the most promising configurations
+
+study_name: "top_performers_full_ablation"
+wandb_project: "emotion2vec_top_performers_full"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  lr_scheduler: "cosine"
+  
+  # Default class weights (best performing from previous study)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Base setup - will be overridden per experiment
+  use_curriculum_learning: false
+  use_speaker_disentanglement: false
+  difficulty_method: "original"
+  curriculum_epochs: 20
+  
+  # FULL EVALUATION - ALL SESSIONS (no single_test_session parameter)
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # BASELINE FOR COMPARISON
+  # ========================================
+  
+  - id: "baseline_enhanced"
+    name: "Baseline Enhanced"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Enhanced simple classifier baseline (65.21% WA on session 5)"
+    category: "baseline"
+
+  # ========================================
+  # TOP PERFORMER #1: PEARSON DIFFICULTY
+  # ========================================
+  
+  - id: "top1_pearson_original"
+    name: "TOP1: Pearson Original"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Best performer: Pearson correlation difficulty (68.25% WA on session 5)"
+    category: "top_performer"
+
+  - id: "top1_pearson_optimized_lr"
+    name: "TOP1: Pearson + Optimized LR"
+    learning_rate: 2e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Pearson with optimized learning rate"
+    category: "top_performer"
+
+  - id: "top1_pearson_speaker_disent"
+    name: "TOP1: Pearson + Speaker Disentanglement"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Pearson + speaker disentanglement"
+    category: "top_performer"
+
+  - id: "top1_pearson_dropout01"
+    name: "TOP1: Pearson + Low Dropout"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Pearson with reduced dropout"
+    category: "top_performer"
+
+  # ========================================
+  # TOP PERFORMER #2: VAD BALANCED 
+  # ========================================
+  
+  - id: "top2_vad_balanced_original"
+    name: "TOP2: VAD Balanced Original"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "weighted_vad_balanced"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "VAD Balanced difficulty [0.4, 0.4, 0.2] (67.87% WA on session 5)"
+    category: "top_performer"
+
+  - id: "top2_vad_balanced_speaker"
+    name: "TOP2: VAD Balanced + Speaker"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "weighted_vad_balanced"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "VAD Balanced + speaker disentanglement"
+    category: "top_performer"
+
+  # ========================================
+  # TOP PERFORMER #3: PLATEAU SCHEDULER
+  # ========================================
+  
+  - id: "top3_plateau_original"
+    name: "TOP3: Plateau Scheduler Original"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    lr_scheduler: "plateau"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Plateau scheduler (67.87% WA on session 5)"
+    category: "top_performer"
+
+  - id: "top3_plateau_curriculum"
+    name: "TOP3: Plateau + Curriculum"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    lr_scheduler: "plateau"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Plateau scheduler + curriculum learning"
+    category: "top_performer"
+
+  # ========================================
+  # TOP PERFORMER #4: BEST COMBO 2 REFINED
+  # ========================================
+  
+  - id: "top4_best_combo_original"
+    name: "TOP4: Best Combo 2 Original"
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "euclidean_distance"
+    curriculum_epochs: 20
+    lr_scheduler: "plateau"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.1
+    description: "Best combo 2: All optimizations (67.87% WA on session 5)"
+    category: "top_performer"
+
+  - id: "top4_best_combo_pearson"
+    name: "TOP4: Best Combo with Pearson"
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 20
+    lr_scheduler: "plateau"
+    class_weights:
+      neutral: 1.0
+      happy: 2.5
+      sad: 1.5
+      anger: 1.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.1
+    description: "Best combo architecture with Pearson difficulty"
+    category: "top_performer"
+
+  # ========================================
+  # TOP PERFORMER #5: BASELINE QUADRATIC
+  # ========================================
+  
+  - id: "top5_quadratic_original"
+    name: "TOP5: Baseline Quadratic Original"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_curriculum_learning: true
+    difficulty_method: "baseline_quadratic"
+    curriculum_epochs: 20
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Baseline quadratic VAD penalties (67.30% WA on session 5)"
+    category: "top_performer"
+
+  - id: "top5_quadratic_enhanced"
+    name: "TOP5: Baseline Quadratic Enhanced"
+    learning_rate: 2e-4
+    weight_decay: 5e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "baseline_quadratic"
+    curriculum_epochs: 15
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Baseline quadratic with all optimizations"
+    category: "top_performer"
+
+  # ========================================
+  # ULTRA OPTIMIZED COMBINATIONS
+  # ========================================
+  
+  - id: "ultra1_pearson_max"
+    name: "ULTRA: Pearson Maximum"
+    learning_rate: 2e-4
+    weight_decay: 5e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 15
+    lr_scheduler: "plateau"
+    class_weights:
+      neutral: 1.0
+      happy: 2.0
+      sad: 1.3
+      anger: 1.3
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Maximum optimization: Pearson + everything"
+    category: "ultra_optimized"
+
+  - id: "ultra2_vad_max"
+    name: "ULTRA: VAD Balanced Maximum"
+    learning_rate: 1e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "weighted_vad_balanced"
+    curriculum_epochs: 10
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 1.0
+      happy: 2.0
+      sad: 1.3
+      anger: 1.3
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Maximum optimization: VAD + everything"
+    category: "ultra_optimized"
+
+  - id: "ultra3_hybrid"
+    name: "ULTRA: Hybrid Approach"
+    learning_rate: 1.5e-4
+    weight_decay: 7.5e-5
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 12
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 1.0
+      happy: 2.25
+      sad: 1.4
+      anger: 1.4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 768
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.075
+    description: "Hybrid optimization targeting 70% WA"
+    category: "ultra_optimized"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  research_questions:
+    - "Which top performer translates best to full LOSO evaluation?"
+    - "Can we achieve 70% WA with optimized versions of top performers?"
+    - "How do the session 5 results compare to full dataset results?"
+    - "What optimizations provide the biggest gains?"
+    - "Which approach is most robust across all sessions?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 16
+  minutes_per_experiment: 180  # ~3 hours per experiment (all sessions)
+  total_hours: 48  # ~2 days
+
+# Expected improvements
+expected_results:
+  session5_best: 0.6825  # Best session 5 result (Pearson)
+  target_wa: 0.70        # Target 70% WA on full dataset
+  top_candidates:
+    - "ultra1_pearson_max"
+    - "ultra2_vad_max" 
+    - "ultra3_hybrid"
+    - "top1_pearson_speaker_disent"
+    - "top4_best_combo_pearson"

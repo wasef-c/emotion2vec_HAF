@@ -1,0 +1,154 @@
+# Breakthrough 72% WA Target
+# Advanced optimization techniques to break through 0.70 barrier
+# Based on best heavy dropout + curriculum result of 0.69915
+
+study_name: "breakthrough_72_ablation"
+wandb_project: "emotion2vec_breakthrough_72"
+
+base_config:
+  num_epochs: 120  # Longer training
+  batch_size: 12   # Smaller batch for better gradients
+  lr_scheduler: "cosine"
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 45  # Extended curriculum
+
+experiments:
+  # ========================================
+  # BREAKTHROUGH OPTIMIZATIONS
+  # ========================================
+  
+  - id: "breakthrough_v1"
+    name: "Breakthrough V1: Advanced Regularization"
+    learning_rate: 8e-5  # Lower LR
+    weight_decay: 1e-6   # Less weight decay
+    use_curriculum_learning: true
+    gradient_clip_norm: 0.5
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.7
+      happy: 4.0
+      sad: 2.0
+      anger: 1.8
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048    # Bigger model
+      pooling: "multi_scale"
+      layer_norm: true
+      dropout: 0.3
+      input_dropout: 0.15
+      feature_normalization: "batch_norm"
+    description: "Advanced regularization techniques"
+    category: "breakthrough"
+
+  - id: "breakthrough_v2"
+    name: "Breakthrough V2: Focal Loss + Mixup"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    use_curriculum_learning: true
+    focal_loss: true
+    focal_alpha: 0.25
+    focal_gamma: 2.5
+    mixup_alpha: 0.2
+    class_weights:
+      neutral: 0.6
+      happy: 4.5
+      sad: 2.2
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      residual_connections: true
+    description: "Focal loss with mixup augmentation"
+    category: "breakthrough"
+
+  - id: "breakthrough_v3"
+    name: "Breakthrough V3: Ensemble Architecture"
+    learning_rate: 1e-4
+    weight_decay: 2e-6
+    use_curriculum_learning: true
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.5
+      anger: 2.2
+    classifier_config:
+      architecture: "ensemble"
+      hidden_dim: 1536
+      pooling: "multi_head_attention"
+      layer_norm: true
+      dropout: 0.35
+      input_dropout: 0.2
+      num_heads: 8
+      ensemble_size: 3
+    description: "Multi-head ensemble architecture"
+    category: "breakthrough"
+
+  - id: "breakthrough_v4"
+    name: "Breakthrough V4: Ultra Optimization"
+    learning_rate: 6e-5
+    weight_decay: 1e-6
+    use_curriculum_learning: true
+    curriculum_epochs: 50
+    warmup_epochs: 10
+    gradient_clip_norm: 1.0
+    focal_loss: true
+    focal_alpha: 0.3
+    focal_gamma: 3.0
+    class_weights:
+      neutral: 0.4
+      happy: 6.0
+      sad: 2.8
+      anger: 2.5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048
+      pooling: "multi_scale"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.25
+      feature_normalization: "layer_norm"
+      activation: "swish"
+    description: "Ultra optimization with all techniques"
+    category: "breakthrough"
+
+  - id: "breakthrough_v5"
+    name: "Breakthrough V5: Balanced Extreme"
+    learning_rate: 1.2e-4
+    weight_decay: 4e-6
+    use_curriculum_learning: true
+    curriculum_epochs: 40
+    class_weights:
+      neutral: 0.8
+      happy: 4.2
+      sad: 2.1
+      anger: 1.9
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1792
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.45
+      input_dropout: 0.22
+      feature_dropout: 0.1
+    description: "Balanced extreme regularization"
+    category: "breakthrough"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  target_wa: 0.72
+  
+  research_questions:
+    - "Can we break through 0.70 WA barrier?"
+    - "Which advanced technique provides biggest gain?"
+    - "What's the optimal balance of regularization vs capacity?"
+
+estimated_runtime:
+  total_experiments: 5
+  minutes_per_experiment: 360  # 6 hours (120 epochs)
+  total_hours: 30

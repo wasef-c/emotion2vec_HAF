@@ -1,0 +1,377 @@
+# Pearson Difficulty Method Ablation Study
+# Focus on optimizing Pearson correlation difficulty with hyperparameter tuning
+# Testing across ALL sessions (not just session 5)
+
+study_name: "pearson_difficulty_ablation"
+wandb_project: "emotion2vec_pearson_optimization"
+
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  lr_scheduler: "cosine"
+  
+  # Class weights (best performing from previous study)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Pearson difficulty setup
+  use_curriculum_learning: true
+  use_speaker_disentanglement: false
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 20
+  
+  # FULL EVALUATION - ALL SESSIONS (remove single_test_session completely)
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # SECTION 1: BASELINE PEARSON
+  # ========================================
+  
+  - id: "pearson_baseline"
+    name: "Pearson Baseline"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Baseline Pearson difficulty (your successful config)"
+    category: "baseline"
+
+  # ========================================
+  # SECTION 2: LEARNING RATE ABLATION
+  # ========================================
+  
+  - id: "pearson_lr_1e4"
+    name: "Pearson LR 1e-4"
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Lower learning rate"
+    category: "learning_rate"
+
+  - id: "pearson_lr_2e4"
+    name: "Pearson LR 2e-4"
+    learning_rate: 2e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Medium learning rate"
+    category: "learning_rate"
+
+  - id: "pearson_lr_5e4"
+    name: "Pearson LR 5e-4"
+    learning_rate: 5e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Higher learning rate"
+    category: "learning_rate"
+
+  - id: "pearson_lr_7e4"
+    name: "Pearson LR 7e-4"
+    learning_rate: 7e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "High learning rate"
+    category: "learning_rate"
+
+  # ========================================
+  # SECTION 3: WEIGHT DECAY ABLATION
+  # ========================================
+  
+  - id: "pearson_wd_1e5"
+    name: "Pearson WD 1e-5"
+    learning_rate: 3e-4
+    weight_decay: 1e-5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Very low weight decay"
+    category: "weight_decay"
+
+  - id: "pearson_wd_5e5"
+    name: "Pearson WD 5e-5"
+    learning_rate: 3e-4
+    weight_decay: 5e-5
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Low weight decay"
+    category: "weight_decay"
+
+  - id: "pearson_wd_5e4"
+    name: "Pearson WD 5e-4"
+    learning_rate: 3e-4
+    weight_decay: 5e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "High weight decay"
+    category: "weight_decay"
+
+  - id: "pearson_wd_1e3"
+    name: "Pearson WD 1e-3"
+    learning_rate: 3e-4
+    weight_decay: 1e-3
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Very high weight decay"
+    category: "weight_decay"
+
+  # ========================================
+  # SECTION 4: DROPOUT ABLATION
+  # ========================================
+  
+  - id: "pearson_dropout_0"
+    name: "Pearson Dropout 0.0"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.0
+    description: "No dropout"
+    category: "dropout"
+
+  - id: "pearson_dropout_01"
+    name: "Pearson Dropout 0.1"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Low dropout"
+    category: "dropout"
+
+  - id: "pearson_dropout_03"
+    name: "Pearson Dropout 0.3"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.3
+    description: "High dropout"
+    category: "dropout"
+
+  - id: "pearson_dropout_04"
+    name: "Pearson Dropout 0.4"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.4
+    description: "Very high dropout"
+    category: "dropout"
+
+  # ========================================
+  # SECTION 5: CURRICULUM EPOCHS VARIATION
+  # ========================================
+  
+  - id: "pearson_curr_10"
+    name: "Pearson Curriculum 10"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    curriculum_epochs: 10
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Faster curriculum (10 epochs)"
+    category: "curriculum_epochs"
+
+  - id: "pearson_curr_15"
+    name: "Pearson Curriculum 15"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    curriculum_epochs: 15
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Medium curriculum (15 epochs)"
+    category: "curriculum_epochs"
+
+  - id: "pearson_curr_25"
+    name: "Pearson Curriculum 25"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    curriculum_epochs: 25
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Slower curriculum (25 epochs)"
+    category: "curriculum_epochs"
+
+  - id: "pearson_curr_30"
+    name: "Pearson Curriculum 30"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    curriculum_epochs: 30
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Very slow curriculum (30 epochs)"
+    category: "curriculum_epochs"
+
+  # ========================================
+  # SECTION 6: SPEAKER DISENTANGLEMENT
+  # ========================================
+  
+  - id: "pearson_speaker_disent"
+    name: "Pearson + Speaker Disentanglement"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    use_speaker_disentanglement: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Pearson + speaker disentanglement"
+    category: "speaker_disentanglement"
+
+  # ========================================
+  # SECTION 7: BEST COMBINATIONS
+  # ========================================
+  
+  - id: "pearson_best_combo_1"
+    name: "Pearson Best Combo 1"
+    learning_rate: 2e-4
+    weight_decay: 5e-5
+    curriculum_epochs: 15
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Best LR + WD + Dropout combination"
+    category: "best_combo"
+
+  - id: "pearson_best_combo_2"
+    name: "Pearson Best Combo 2"
+    learning_rate: 1e-4
+    weight_decay: 1e-5
+    curriculum_epochs: 10
+    use_speaker_disentanglement: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.1
+    description: "Conservative LR + low WD + speaker disentanglement"
+    category: "best_combo"
+
+  - id: "pearson_best_combo_3"
+    name: "Pearson Best Combo 3"
+    learning_rate: 5e-4
+    weight_decay: 1e-4
+    curriculum_epochs: 25
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.0
+    description: "High LR + longer curriculum + no dropout"
+    category: "best_combo"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  research_questions:
+    - "What learning rate optimizes Pearson difficulty performance?"
+    - "How does weight decay affect curriculum learning with Pearson?"
+    - "What dropout rate works best with Pearson correlation difficulty?"
+    - "What curriculum pacing is optimal for Pearson method?"
+    - "Does speaker disentanglement improve Pearson difficulty results?"
+    - "Can we reach 70% WA by optimizing Pearson hyperparameters?"
+    - "What is the best hyperparameter combination for Pearson difficulty?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 21
+  minutes_per_experiment: 180  # ~3 hours per experiment (all sessions)
+  total_hours: 63  # ~2.5 days
+
+# Expected improvements
+expected_results:
+  baseline_wa: 0.6825  # Your Pearson result on session 5
+  target_wa: 0.70     # Target 70% WA
+  key_optimizations:
+    - "Learning rate fine-tuning"
+    - "Weight decay optimization"
+    - "Dropout regularization tuning"
+    - "Curriculum pacing optimization"
+    - "Speaker disentanglement benefits"
+  expected_best_lr: 0.0002  # Prediction: slightly lower than 3e-4
+  expected_best_wd: 5e-5    # Prediction: lower weight decay
+  expected_best_dropout: 0.1 # Prediction: lower dropout

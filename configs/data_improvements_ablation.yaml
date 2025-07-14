@@ -1,0 +1,176 @@
+# Data-Level Improvements to Break 70.8% Barrier
+# Focus on data quality, preprocessing, and augmentation
+
+study_name: "data_improvements_ablation"
+wandb_project: "emotion2vec_data_improvements"
+
+base_config:
+  num_epochs: 80
+  batch_size: 16
+  lr_scheduler: "cosine"
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 30
+  
+  # Best model config (9e-5 LR)
+  learning_rate: 9e-5
+  weight_decay: 5e-6
+  use_curriculum_learning: true
+  focal_loss: true
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  class_weights:
+    neutral: 0.8
+    happy: 3.5
+    sad: 1.8
+    anger: 1.6
+  classifier_config:
+    architecture: "simple"
+    hidden_dim: 1536
+    pooling: "attention"
+    layer_norm: true
+    dropout: 0.4
+    input_dropout: 0.2
+
+experiments:
+  # ========================================
+  # DATA PREPROCESSING VARIATIONS
+  # ========================================
+  
+  - id: "feature_normalization"
+    name: "Feature Normalization"
+    feature_preprocessing:
+      normalize_features: true
+      normalization_method: "standardize"  # z-score normalization
+    description: "Standardize emotion2vec features"
+    category: "preprocessing"
+
+  - id: "feature_clipping"
+    name: "Feature Clipping"
+    feature_preprocessing:
+      clip_outliers: true
+      clip_percentile: 99  # Clip top 1% outliers
+    description: "Clip extreme feature values"
+    category: "preprocessing"
+
+  - id: "speaker_balance"
+    name: "Speaker Balanced Sampling"
+    training_strategy:
+      speaker_balanced_batches: true
+      speakers_per_batch: 4
+    description: "Ensure speaker diversity in each batch"
+    category: "sampling"
+
+  # ========================================
+  # DATA AUGMENTATION
+  # ========================================
+  
+  - id: "mixup_features"
+    name: "Feature Mixup"
+    mixup_alpha: 0.2
+    mixup_prob: 0.5
+    description: "Mixup augmentation on features"
+    category: "augmentation"
+
+  - id: "cutmix_features"
+    name: "Feature CutMix"
+    cutmix_alpha: 1.0
+    cutmix_prob: 0.5
+    description: "CutMix augmentation on feature dimensions"
+    category: "augmentation"
+
+  - id: "noise_injection"
+    name: "Gaussian Noise Injection"
+    noise_augmentation:
+      gaussian_noise: 0.01
+      noise_prob: 0.3
+    description: "Add small Gaussian noise to features"
+    category: "augmentation"
+
+  # ========================================
+  # ENSEMBLE APPROACHES
+  # ========================================
+  
+  - id: "temporal_ensemble"
+    name: "Temporal Ensemble"
+    ensemble_config:
+      temporal_windows: [3, 5, 7]  # Different window sizes
+      ensemble_method: "average"
+    description: "Ensemble predictions across temporal windows"
+    category: "ensemble"
+
+  - id: "cross_session_validation"
+    name: "Cross-Session Validation"
+    validation_strategy:
+      cross_session: true
+      test_sessions: ["Ses04", "Ses05"]
+      train_sessions: ["Ses01", "Ses02", "Ses03"]
+    description: "Strict cross-session validation"
+    category: "validation"
+
+  # ========================================
+  # ADVANCED CURRICULUM STRATEGIES
+  # ========================================
+  
+  - id: "dynamic_curriculum"
+    name: "Dynamic Curriculum"
+    curriculum_epochs: 40
+    curriculum_strategy:
+      dynamic_threshold: true
+      accuracy_threshold: 0.6  # Switch when train acc > 60%
+      difficulty_schedule: "exponential"
+    description: "Dynamic curriculum based on performance"
+    category: "curriculum"
+
+  - id: "emotion_specific_curriculum"
+    name: "Emotion-Specific Curriculum"
+    curriculum_strategy:
+      emotion_specific: true
+      happy_boost_epoch: 20  # Focus on happy class later
+      neutral_reduce_epoch: 30
+    description: "Curriculum tailored to each emotion"
+    category: "curriculum"
+
+  # ========================================
+  # MODEL ARCHITECTURE TWEAKS
+  # ========================================
+  
+  - id: "larger_hidden"
+    name: "Larger Hidden Dimension"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048  # Larger capacity
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.45  # More dropout for larger model
+      input_dropout: 0.25
+    description: "Larger model with more regularization"
+    category: "architecture"
+
+  - id: "multi_scale_pooling"
+    name: "Multi-Scale Pooling"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "multi_scale"  # Different pooling strategy
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Multi-scale attention pooling"
+    category: "architecture"
+
+analysis:
+  primary_metric: "iemocap_wa"
+  baseline_wa: 0.708  # Current best from LR 9e-5
+  target_wa: 0.72
+  
+  research_questions:
+    - "Can data preprocessing break the 70.8% barrier?"
+    - "Which augmentation technique provides biggest gain?"
+    - "Is the ceiling due to data quality or model capacity?"
+    - "Can ensemble methods push beyond single model limits?"
+
+estimated_runtime:
+  total_experiments: 12
+  minutes_per_experiment: 240
+  total_hours: 48

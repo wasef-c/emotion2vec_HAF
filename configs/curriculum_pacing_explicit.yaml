@@ -1,0 +1,101 @@
+# Curriculum Pacing Ablation - Explicit Configs
+# Each experiment explicitly lists all parameters
+
+study_name: "curriculum_pacing_explicit"
+wandb_project: "emotion2vec_curriculum_pacing_explicit"
+
+base_config:
+  num_epochs: 80
+  batch_size: 16
+
+experiments:
+  # BASELINE - 30 epochs
+  - id: "baseline_30"
+    name: "Baseline (30 epochs)"
+    learning_rate: 9e-5
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    focal_loss: true
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Baseline 30 epoch curriculum"
+    category: "baseline"
+
+  # SHORT - 15 epochs
+  - id: "short_15"
+    name: "Short (15 epochs)"
+    learning_rate: 9e-5
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 15
+    lr_scheduler: "cosine"
+    focal_loss: true
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Short 15 epoch curriculum"
+    category: "short"
+
+  # LONG - 50 epochs
+  - id: "long_50"
+    name: "Long (50 epochs)"
+    learning_rate: 9e-5
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 50
+    lr_scheduler: "cosine"
+    focal_loss: true
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Long 50 epoch curriculum"
+    category: "long"
+
+analysis:
+  primary_metric: "iemocap_wa"
+  baseline_wa: 0.708

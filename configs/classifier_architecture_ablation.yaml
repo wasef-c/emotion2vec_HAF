@@ -1,0 +1,240 @@
+# Classifier Architecture Ablation Study
+# Testing different improvements to the simple classifier
+
+study_name: "classifier_architecture_ablation"
+wandb_project: "emotion2vec_classifier_ablation_precomp"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  weight_decay: 1e-4
+  lr_scheduler: "cosine"
+  
+  # Class weights (best performing from previous study)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Base setup - will be overridden per experiment
+  use_curriculum_learning: false
+  use_speaker_disentanglement: false
+  difficulty_method: "original"
+  curriculum_epochs: 20
+  
+  # Fast testing
+  single_test_session: 5
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # BASELINE
+  # ========================================
+  
+  # - id: "baseline_simple"
+    # name: "Baseline (Simple)"
+    # learning_rate: 3e-4
+    # classifier_config:
+    #   architecture: "simple"
+    #   hidden_dim: 256
+    #   pooling: "mean"
+    #   layer_norm: false
+    #   dropout: 0.2
+    # description: "Current simple classifier baseline"
+    # category: "baseline"
+
+  # ========================================
+  # POOLING STRATEGIES
+  # ========================================
+  
+  # - id: "max_mean_pooling"
+  #   name: "Max+Mean Pooling"
+  #   learning_rate: 3e-4
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 256
+  #     pooling: "max_mean"
+  #     layer_norm: false
+  #     dropout: 0.2
+  #   description: "Concatenate max and mean pooling"
+  #   category: "pooling"
+
+  - id: "attention_pooling"
+    name: "Attention Pooling"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "attention"
+      layer_norm: false
+      dropout: 0.2
+    description: "Learnable attention-based pooling"
+    category: "pooling"
+
+  - id: "first_last_pooling"
+    name: "First+Last Pooling"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "first_last"
+      layer_norm: false
+      dropout: 0.2
+    description: "Concatenate first and last frame features"
+    category: "pooling"
+
+  # ========================================
+  # HIDDEN DIMENSIONS
+  # ========================================
+  
+  - id: "hidden_512"
+    name: "Hidden 512"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Larger hidden dimension (512)"
+    category: "hidden_size"
+
+  - id: "hidden_512_max_mean"
+    name: "Hidden 512 + Max+Mean"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Best pooling + larger hidden size"
+    category: "combined"
+
+  # ========================================
+  # LAYER NORMALIZATION
+  # ========================================
+  
+  - id: "layer_norm"
+    name: "Layer Norm"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Add layer normalization"
+    category: "normalization"
+
+  - id: "layer_norm_max_mean"
+    name: "Layer Norm + Max+Mean"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Layer norm + better pooling"
+    category: "combined"
+
+  # ========================================
+  # LEARNING RATES
+  # ========================================
+  
+  - id: "lr_1e4"
+    name: "LR 1e-4"
+    learning_rate: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Lower learning rate"
+    category: "learning_rate"
+
+  - id: "lr_5e4"
+    name: "LR 5e-4"
+    learning_rate: 5e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Higher learning rate"
+    category: "learning_rate"
+
+  # ========================================
+  # BEST COMBINATIONS
+  # ========================================
+  
+  - id: "best_combo_1"
+    name: "Best Combo 1"
+    learning_rate: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements + LR 1e-4"
+    category: "best_combo"
+
+  - id: "best_combo_2"
+    name: "Best Combo 2"
+    learning_rate: 3e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements + LR 3e-4"
+    category: "best_combo"
+
+  - id: "best_combo_3"
+    name: "Best Combo 3"
+    learning_rate: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements + attention pooling"
+    category: "best_combo"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_uar"
+  secondary_metrics:
+    - "iemocap_wa"
+    - "cross_corpus_uar"
+  
+  research_questions:
+    - "Which pooling strategy works best?"
+    - "Does larger hidden dimension help?"
+    - "Does layer normalization improve performance?"
+    - "What's the optimal learning rate?"
+    - "What's the best combination of improvements?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 13
+  minutes_per_experiment: 42
+  total_hours: 9.1
+
+# Expected improvements
+expected_results:
+  baseline_uar: 0.55  # Current simple classifier
+  target_uar: 0.62   # Goal with improvements
+  best_improvements:
+    - pooling_strategy
+    - hidden_dimension
+    - layer_normalization

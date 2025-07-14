@@ -1,0 +1,381 @@
+# Curriculum Learning A/B Comparison Study
+# Direct comparison of heavy dropout + extreme happy boost WITH and WITHOUT curriculum learning
+# Goal: Quantify the exact impact of curriculum learning on performance
+
+study_name: "curriculum_comparison_ablation_V2"
+wandb_project: "emotion2vec_curriculum_ab_test_v2"
+
+# Base configuration for all experiments
+base_config:
+  # Extended training for better convergence
+  num_epochs: 80
+  batch_size: 16
+  lr_scheduler: "cosine"
+  
+  # Default settings (curriculum will be toggled per experiment)
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 30
+  
+  # FULL EVALUATION - ALL SESSIONS
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # PAIR 1: BASELINE COMPARISON
+  # ========================================
+  
+  - id: "baseline_no_curriculum"
+    name: "Baseline NO Curriculum"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: false
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Baseline WITHOUT curriculum learning"
+    category: "no_curriculum"
+
+  - id: "baseline_with_curriculum"
+    name: "Baseline WITH Curriculum"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Baseline WITH curriculum learning"
+    category: "with_curriculum"
+
+  # ========================================
+  # PAIR 2: HEAVY DROPOUT COMPARISON
+  # ========================================
+  
+  - id: "heavy_dropout_no_curriculum"
+    name: "Heavy Dropout NO Curriculum"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: false
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout WITHOUT curriculum learning"
+    category: "no_curriculum"
+
+  - id: "heavy_dropout_with_curriculum"
+    name: "Heavy Dropout WITH Curriculum"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout WITH curriculum learning"
+    category: "with_curriculum"
+
+  # ========================================
+  # PAIR 3: EXTREME HAPPY BOOST COMPARISON
+  # ========================================
+  
+  - id: "extreme_happy_no_curriculum"
+    name: "Extreme Happy NO Curriculum"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: false
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Extreme happy boost WITHOUT curriculum learning"
+    category: "no_curriculum"
+
+  - id: "extreme_happy_with_curriculum"
+    name: "Extreme Happy WITH Curriculum"
+    learning_rate: 2e-4
+    weight_decay: 1e-5
+    use_curriculum_learning: true
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1024
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.05
+    description: "Extreme happy boost WITH curriculum learning"
+    category: "with_curriculum"
+
+  # ========================================
+  # PAIR 4: COMBO HEAVY DROPOUT + EXTREME HAPPY
+  # ========================================
+  
+  - id: "combo_no_curriculum"
+    name: "COMBO NO Curriculum"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    use_curriculum_learning: false
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout + extreme happy WITHOUT curriculum learning"
+    category: "no_curriculum"
+
+  - id: "combo_with_curriculum"
+    name: "COMBO WITH Curriculum"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    use_curriculum_learning: true
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout + extreme happy WITH curriculum learning"
+    category: "with_curriculum"
+
+  # ========================================
+  # PAIR 5: ULTRA OPTIMIZATION COMPARISON
+  # ========================================
+  
+  - id: "ultra_no_curriculum"
+    name: "ULTRA NO Curriculum"
+    learning_rate: 8e-5
+    weight_decay: 2e-6
+    use_curriculum_learning: false
+    focal_loss: true
+    focal_alpha: 0.5
+    focal_gamma: 3.0
+    class_weights:
+      neutral: 0.4
+      happy: 6.0
+      sad: 2.2
+      anger: 2.2
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048
+      pooling: "multi_scale"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "l2"
+    description: "Ultra optimization WITHOUT curriculum learning"
+    category: "no_curriculum"
+
+  - id: "ultra_with_curriculum"
+    name: "ULTRA WITH Curriculum"
+    learning_rate: 8e-5
+    weight_decay: 2e-6
+    use_curriculum_learning: true
+    curriculum_epochs: 40  # Longer curriculum for ultra
+    focal_loss: true
+    focal_alpha: 0.5
+    focal_gamma: 3.0
+    class_weights:
+      neutral: 0.4
+      happy: 6.0
+      sad: 2.2
+      anger: 2.2
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 2048
+      pooling: "multi_scale"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "l2"
+    description: "Ultra optimization WITH curriculum learning"
+    category: "with_curriculum"
+
+  # ========================================
+  # PAIR 6: SPEAKER DISENTANGLEMENT COMPARISON
+  # Test if curriculum works better with/without speaker disentanglement
+  # ========================================
+  
+  - id: "curriculum_no_speaker"
+    name: "Curriculum NO Speaker"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Curriculum learning WITHOUT speaker disentanglement"
+    category: "curriculum_variations"
+
+  - id: "curriculum_with_speaker"
+    name: "Curriculum WITH Speaker"
+    learning_rate: 1e-4
+    weight_decay: 3e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    class_weights:
+      neutral: 0.5
+      happy: 5.0
+      sad: 2.0
+      anger: 2.0
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Curriculum learning WITH speaker disentanglement"
+    category: "curriculum_variations"
+
+  # ========================================
+  # PAIR 7: BASELINE HEAVY DROPOUT VARIATIONS
+  # ========================================
+  
+  - id: "heavy_dropout_baseline"
+    name: "Heavy Dropout BASELINE (no speaker, no curriculum)"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: false
+    use_speaker_disentanglement: false
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout WITHOUT speaker disentanglement or curriculum"
+    category: "baseline_variations"
+
+  - id: "heavy_dropout_speaker_only"
+    name: "Heavy Dropout SPEAKER ONLY (no curriculum)"
+    learning_rate: 1e-4
+    weight_decay: 5e-6
+    use_curriculum_learning: false
+    use_speaker_disentanglement: true
+    lr_scheduler: "cosine"
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Heavy dropout WITH speaker disentanglement but WITHOUT curriculum"
+    category: "baseline_variations"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  
+  research_questions:
+    - "How much does curriculum learning improve WA across different strategies?"
+    - "Which strategy benefits most from curriculum learning?"
+    - "Is curriculum learning more important for complex models or simple ones?"
+    - "Does curriculum learning work better with or without speaker disentanglement?"
+    - "What's the performance gap between best no-curriculum vs worst with-curriculum?"
+
+  comparison_pairs:
+    - ["baseline_no_curriculum", "baseline_with_curriculum"]
+    - ["heavy_dropout_no_curriculum", "heavy_dropout_with_curriculum"] 
+    - ["extreme_happy_no_curriculum", "extreme_happy_with_curriculum"]
+    - ["combo_no_curriculum", "combo_with_curriculum"]
+    - ["ultra_no_curriculum", "ultra_with_curriculum"]
+    - ["curriculum_no_speaker", "curriculum_with_speaker"]
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 12
+  minutes_per_experiment: 240  # 4 hours per experiment (80 epochs)
+  total_hours: 48  # 2 days
+
+# Expected results
+expected_curriculum_impact:
+  baseline_improvement: "+2-4% WA"
+  heavy_dropout_improvement: "+3-5% WA" 
+  extreme_happy_improvement: "+2-3% WA"
+  combo_improvement: "+4-6% WA"
+  ultra_improvement: "+3-5% WA"
+  
+  hypothesis: "Curriculum learning should provide bigger gains for more complex strategies"

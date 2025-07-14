@@ -1,0 +1,262 @@
+# Classifier Architecture + Curriculum Learning Ablation Study
+# Testing different improvements to the simple classifier with/without curriculum
+
+study_name: "classifier_architecture_curriculum_ablation"
+wandb_project: "emotion2vec_classifier_curriculum_ablation"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  weight_decay: 1e-4
+  lr_scheduler: "cosine"
+  
+  # Class weights (best performing from previous study)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Base setup - will be overridden per experiment
+  use_speaker_disentanglement: false
+  difficulty_method: "original"
+  curriculum_epochs: 20
+  
+  # Fast testing
+  single_test_session: 5
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # BASELINE - NO CURRICULUM
+  # ========================================
+  
+  - id: "baseline_simple_no_curriculum"
+    name: "Baseline (Simple) - No Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Current simple classifier baseline without curriculum"
+    category: "baseline"
+
+  - id: "baseline_simple_curriculum"
+    name: "Baseline (Simple) - Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Current simple classifier baseline with curriculum"
+    category: "baseline"
+
+  # ========================================
+  # POOLING STRATEGIES - NO CURRICULUM
+  # ========================================
+  
+  - id: "max_mean_pooling_no_curriculum"
+    name: "Max+Mean Pooling - No Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "max_mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Concatenate max and mean pooling without curriculum"
+    category: "pooling"
+
+  - id: "max_mean_pooling_curriculum"
+    name: "Max+Mean Pooling - Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "max_mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Concatenate max and mean pooling with curriculum"
+    category: "pooling"
+
+  - id: "attention_pooling_no_curriculum"
+    name: "Attention Pooling - No Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "attention"
+      layer_norm: false
+      dropout: 0.2
+    description: "Learnable attention-based pooling without curriculum"
+    category: "pooling"
+
+  - id: "attention_pooling_curriculum"
+    name: "Attention Pooling - Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "attention"
+      layer_norm: false
+      dropout: 0.2
+    description: "Learnable attention-based pooling with curriculum"
+    category: "pooling"
+
+  # ========================================
+  # HIDDEN DIMENSIONS - NO CURRICULUM
+  # ========================================
+  
+  - id: "hidden_512_no_curriculum"
+    name: "Hidden 512 - No Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Larger hidden dimension (512) without curriculum"
+    category: "hidden_size"
+
+  - id: "hidden_512_curriculum"
+    name: "Hidden 512 - Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "mean"
+      layer_norm: false
+      dropout: 0.2
+    description: "Larger hidden dimension (512) with curriculum"
+    category: "hidden_size"
+
+  # ========================================
+  # LAYER NORMALIZATION - NO CURRICULUM
+  # ========================================
+  
+  - id: "layer_norm_no_curriculum"
+    name: "Layer Norm - No Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Add layer normalization without curriculum"
+    category: "normalization"
+
+  - id: "layer_norm_curriculum"
+    name: "Layer Norm - Curriculum"
+    learning_rate: 3e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 256
+      pooling: "mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Add layer normalization with curriculum"
+    category: "normalization"
+
+  # ========================================
+  # BEST COMBINATIONS - NO CURRICULUM
+  # ========================================
+  
+  - id: "best_combo_no_curriculum"
+    name: "Best Combo - No Curriculum"
+    learning_rate: 1e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements without curriculum"
+    category: "best_combo"
+
+  - id: "best_combo_curriculum"
+    name: "Best Combo - Curriculum"
+    learning_rate: 1e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements with curriculum"
+    category: "best_combo"
+
+  - id: "best_combo_attention_no_curriculum"
+    name: "Best Combo Attention - No Curriculum"
+    learning_rate: 1e-4
+    use_curriculum_learning: false
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements + attention without curriculum"
+    category: "best_combo"
+
+  - id: "best_combo_attention_curriculum"
+    name: "Best Combo Attention - Curriculum"
+    learning_rate: 1e-4
+    use_curriculum_learning: true
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.2
+    description: "All improvements + attention with curriculum"
+    category: "best_combo"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_uar"
+  secondary_metrics:
+    - "iemocap_wa"
+    - "cross_corpus_uar"
+  
+  research_questions:
+    - "Which pooling strategy works best?"
+    - "Does larger hidden dimension help?"
+    - "Does layer normalization improve performance?"
+    - "Does curriculum learning help with different architectures?"
+    - "What's the best combination of improvements?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 16
+  minutes_per_experiment: 42
+  total_hours: 11.2
+
+# Expected improvements
+expected_results:
+  baseline_uar: 0.55  # Current simple classifier
+  target_uar: 0.62   # Goal with improvements
+  best_improvements:
+    - pooling_strategy
+    - hidden_dimension
+    - layer_normalization
+    - curriculum_learning

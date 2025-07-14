@@ -1,0 +1,288 @@
+# Minimal Improvements from 0.69915 Baseline
+# Tiny adjustments to the working heavy dropout + curriculum config
+
+study_name: "minimal_improvements_ablation"
+wandb_project: "emotion2vec_minimal_improvements"
+
+base_config:
+  num_epochs: 80
+  batch_size: 16
+  lr_scheduler: "cosine"
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 30
+
+experiments:
+  # # Exact baseline that got 0.69915
+  # - id: "baseline_69915"
+  #   name: "Baseline 0.69915"
+  #   learning_rate: 1e-4
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
+  #   difficulty_method: "pearson_correlation"
+  #   curriculum_epochs: 30
+  #   lr_scheduler: "cosine"
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.4
+  #     input_dropout: 0.2
+  #   description: "Exact baseline that achieved 0.69915"
+  #   category: "baseline"
+
+  # # Tiny LR adjustment
+  # - id: "lr_tweak_1"
+  #   name: "LR 9e-5"
+  #   learning_rate: 9e-5
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.4
+  #     input_dropout: 0.2
+  #   description: "Slightly lower learning rate"
+  #   category: "lr_tweaks"
+
+  # - id: "lr_tweak_2"
+  #   name: "LR 1.1e-4"
+  #   learning_rate: 1.1e-4
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.4
+  #     input_dropout: 0.2
+  #   description: "Slightly higher learning rate"
+  #   category: "lr_tweaks"
+
+  # # Tiny weight decay adjustment
+  # - id: "wd_tweak_1"
+  #   name: "WD 4e-6"
+  #   learning_rate: 1e-4
+  #   weight_decay: 4e-6
+  #   use_curriculum_learning: true
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.4
+  #     input_dropout: 0.2
+  #   description: "Slightly lower weight decay"
+  #   category: "wd_tweaks"
+
+  # # Tiny dropout adjustment
+  # - id: "dropout_tweak_1"
+  #   name: "Dropout 0.38"
+  #   learning_rate: 1e-4
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.38
+  #     input_dropout: 0.2
+  #   description: "Slightly lower dropout"
+  #   category: "dropout_tweaks"
+
+  # - id: "dropout_tweak_2"
+  #   name: "Dropout 0.42"
+  #   learning_rate: 1e-4
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.42
+  #     input_dropout: 0.2
+  #   description: "Slightly higher dropout"
+  #   category: "dropout_tweaks"
+
+  # # Tiny class weight adjustment
+  # - id: "happy_weight_tweak"
+  #   name: "Happy Weight 3.6"
+  #   learning_rate: 1e-4
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.6
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.4
+  #     input_dropout: 0.2
+  #   description: "Slightly higher happy weight"
+  #   category: "weight_tweaks"
+
+  # # Slightly longer training
+  # - id: "longer_training"
+  #   name: "90 Epochs"
+  #   learning_rate: 1e-4
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   num_epochs: 90
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.4
+  #     input_dropout: 0.2
+  #   description: "10 more epochs"
+  #   category: "training_tweaks"
+
+  # ========================================
+  # ADVANCED TECHNIQUES ON BEST LR (9e-5)
+  # ========================================
+
+  # - id: "dropout_schedule"
+  #   name: "Dropout Schedule (9e-5 LR)"
+  #   learning_rate: 9e-5
+  #   weight_decay: 5e-6
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
+  #   difficulty_method: "pearson_correlation"
+  #   curriculum_epochs: 30
+  #   lr_scheduler: "cosine"
+  #   class_weights:
+  #     neutral: 0.8
+  #     happy: 3.5
+  #     sad: 1.8
+  #     anger: 1.6
+  #   classifier_config:
+  #     architecture: "simple"
+  #     hidden_dim: 1536
+  #     pooling: "attention"
+  #     layer_norm: true
+  #     dropout: 0.5  # Start high
+  #     input_dropout: 0.25  # Start high
+  #     dropout_schedule:
+  #       enabled: true
+  #       dropout_start: 0.5
+  #       dropout_end: 0.3
+  #       input_dropout_start: 0.25
+  #       input_dropout_end: 0.15
+  #   description: "Dropout schedule: start high, decay during training"
+  #   category: "advanced_techniques"
+
+  - id: "label_smoothing"
+    name: "Label Smoothing (9e-5 LR)"
+    learning_rate: 9e-5
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    focal_loss: true  # Use focal loss with manual label smoothing
+    focal_alpha: 0.25
+    focal_gamma: 2.0
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+    description: "Label smoothing with CrossEntropyLoss"
+    category: "advanced_techniques"
+
+  - id: "dropout_schedule_plus_smoothing"
+    name: "Dropout Schedule + Label Smoothing"
+    learning_rate: 9e-5
+    weight_decay: 5e-6
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
+    difficulty_method: "pearson_correlation"
+    curriculum_epochs: 30
+    lr_scheduler: "cosine"
+    label_smoothing: 0.1
+    class_weights:
+      neutral: 0.8
+      happy: 3.5
+      sad: 1.8
+      anger: 1.6
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.5
+      input_dropout: 0.25
+      dropout_schedule:
+        enabled: true
+        dropout_start: 0.5
+        dropout_end: 0.3
+        input_dropout_start: 0.25
+        input_dropout_end: 0.15
+    description: "Combined dropout schedule + label smoothing"
+    category: "advanced_techniques"
+
+analysis:
+  primary_metric: "iemocap_wa"
+  baseline_wa: 0.69915
+  target_improvement: "+0.005 WA"
+
+estimated_runtime:
+  total_experiments: 8
+  minutes_per_experiment: 240
+  total_hours: 32

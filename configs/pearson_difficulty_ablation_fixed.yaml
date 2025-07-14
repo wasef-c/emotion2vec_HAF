@@ -1,0 +1,111 @@
+# Pearson Difficulty Method Ablation Study
+# Focus on optimizing Pearson correlation difficulty with hyperparameter tuning
+# Testing across ALL sessions (not just session 5)
+
+study_name: "pearson_difficulty_ablation"
+wandb_project: "emotion2vec_pearson_optimization"
+
+# Base configuration for all experiments
+base_config:
+  # Core training parameters
+  num_epochs: 50
+  batch_size: 20
+  lr_scheduler: "cosine"
+  
+  # Class weights (best performing from previous study)
+  class_weights:
+    neutral: 1.0
+    happy: 2.5
+    sad: 1.5
+    anger: 1.5
+  
+  # Pearson difficulty setup
+  use_curriculum_learning: true
+  use_speaker_disentanglement: false
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 20
+
+# Experiment definitions
+experiments:
+  # ========================================
+  # SECTION 1: BASELINE PEARSON
+  # ========================================
+  
+  - id: "pearson_baseline"
+    name: "Pearson Baseline"
+    learning_rate: 3e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Baseline Pearson difficulty (your successful config)"
+    category: "baseline"
+
+  # ========================================
+  # SECTION 2: LEARNING RATE ABLATION
+  # ========================================
+  
+  - id: "pearson_lr_1e4"
+    name: "Pearson LR 1e-4"
+    learning_rate: 1e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Lower learning rate"
+    category: "learning_rate"
+
+  - id: "pearson_lr_2e4"
+    name: "Pearson LR 2e-4"
+    learning_rate: 2e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Medium learning rate"
+    category: "learning_rate"
+
+  - id: "pearson_lr_5e4"
+    name: "Pearson LR 5e-4"
+    learning_rate: 5e-4
+    weight_decay: 1e-4
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 512
+      pooling: "max_mean"
+      layer_norm: true
+      dropout: 0.2
+    description: "Higher learning rate"
+    category: "learning_rate"
+
+# Analysis settings
+analysis:
+  primary_metric: "iemocap_wa"
+  secondary_metrics:
+    - "iemocap_uar"
+    - "cross_corpus_uar"
+  
+  research_questions:
+    - "What learning rate optimizes Pearson difficulty performance?"
+    - "How does weight decay affect curriculum learning with Pearson?"
+    - "Can we reach 70% WA by optimizing Pearson hyperparameters?"
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 4
+  minutes_per_experiment: 180  # ~3 hours per experiment (all sessions)
+  total_hours: 12
+
+# Expected improvements
+expected_results:
+  baseline_wa: 0.6825  # Your Pearson result on session 5
+  target_wa: 0.70     # Target 70% WA

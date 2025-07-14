@@ -1,0 +1,229 @@
+# Audio Augmentation Ablation Study
+# Testing feature-level augmentations on real-time audio processing
+# Based on 70.8% WA baseline configuration
+
+study_name: "audio_augmentation_ablation"
+wandb_project: "emotion2vec_audio_augmentation_V2"
+
+# Base configuration - EXACT 70.8% WA baseline
+base_config:
+  # Core training parameters
+  num_epochs: 80
+  batch_size: 16
+  learning_rate: 9e-5
+  weight_decay: 5e-6
+  lr_scheduler: "cosine"
+  
+  # Model architecture (fixed to working config)
+  use_speaker_disentanglement: true
+  use_curriculum_learning: true
+  difficulty_method: "pearson_correlation"
+  curriculum_epochs: 30
+  
+  # Loss configuration
+  focal_loss: true
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  label_smoothing: 0.1
+  
+  # Class weights (optimized)
+  class_weights:
+    neutral: 0.8
+    happy: 3.5
+    sad: 1.8
+    anger: 1.6
+  
+  # Classifier config (fixed)
+  classifier_config:
+    architecture: "simple"
+    hidden_dim: 1536
+    pooling: "attention"
+    layer_norm: true
+    dropout: 0.4
+    input_dropout: 0.2
+
+experiments:
+  # ========================================
+  # BASELINE WITHOUT AUGMENTATION
+  # ========================================
+  
+  - id: "baseline_no_aug"
+    name: "Baseline No Augmentation"
+    description: "70.8% WA baseline without any augmentation"
+    category: "baseline"
+
+  # ========================================
+  # FEATURE MIXUP AUGMENTATION
+  # ========================================
+  
+  - id: "mixup_light"
+    name: "Light Mixup (α=0.1)"
+    mixup_alpha: 0.1
+    mixup_prob: 0.3
+    description: "Light mixup augmentation"
+    category: "mixup"
+
+  - id: "mixup_medium"
+    name: "Medium Mixup (α=0.2)"
+    mixup_alpha: 0.2
+    mixup_prob: 0.5
+    description: "Medium mixup augmentation"
+    category: "mixup"
+
+  - id: "mixup_strong"
+    name: "Strong Mixup (α=0.4)"
+    mixup_alpha: 0.4
+    mixup_prob: 0.7
+    description: "Strong mixup augmentation"
+    category: "mixup"
+
+  # ========================================
+  # GAUSSIAN NOISE INJECTION
+  # ========================================
+  
+  - id: "noise_light"
+    name: "Light Noise (σ=0.005)"
+    noise_augmentation:
+      gaussian_noise: 0.005
+      noise_prob: 0.3
+    description: "Light Gaussian noise injection"
+    category: "noise"
+
+  - id: "noise_medium"
+    name: "Medium Noise (σ=0.01)"
+    noise_augmentation:
+      gaussian_noise: 0.01
+      noise_prob: 0.5
+    description: "Medium Gaussian noise injection"
+    category: "noise"
+
+  - id: "noise_strong"
+    name: "Strong Noise (σ=0.02)"
+    noise_augmentation:
+      gaussian_noise: 0.02
+      noise_prob: 0.3
+    description: "Strong Gaussian noise injection"
+    category: "noise"
+
+  # ========================================
+  # CUTMIX AUGMENTATION
+  # ========================================
+  
+  - id: "cutmix_light"
+    name: "Light CutMix (α=0.5)"
+    cutmix_alpha: 0.5
+    cutmix_prob: 0.3
+    description: "Light CutMix feature masking"
+    category: "cutmix"
+
+  - id: "cutmix_medium"
+    name: "Medium CutMix (α=1.0)"
+    cutmix_alpha: 1.0
+    cutmix_prob: 0.5
+    description: "Medium CutMix feature masking"
+    category: "cutmix"
+
+  # ========================================
+  # FEATURE NORMALIZATION VARIATIONS
+  # ========================================
+  
+  - id: "layer_norm_features"
+    name: "Layer Norm Features"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "layer_norm"
+    description: "Layer normalization on input features"
+    category: "normalization"
+
+  - id: "l2_norm_features"
+    name: "L2 Norm Features"
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "l2"
+    description: "L2 normalization on input features"
+    category: "normalization"
+
+  # ========================================
+  # COMBINED AUGMENTATION STRATEGIES
+  # ========================================
+  
+  - id: "combined_light"
+    name: "Combined Light Augmentation"
+    mixup_alpha: 0.1
+    mixup_prob: 0.3
+    noise_augmentation:
+      gaussian_noise: 0.005
+      noise_prob: 0.2
+    description: "Light mixup + light noise"
+    category: "combined"
+
+  - id: "combined_medium"
+    name: "Combined Medium Augmentation"
+    mixup_alpha: 0.2
+    mixup_prob: 0.4
+    noise_augmentation:
+      gaussian_noise: 0.01
+      noise_prob: 0.3
+    classifier_config:
+      architecture: "simple"
+      hidden_dim: 1536
+      pooling: "attention"
+      layer_norm: true
+      dropout: 0.4
+      input_dropout: 0.2
+      feature_normalization: "l2"
+    description: "Medium mixup + noise + L2 norm"
+    category: "combined"
+
+  - id: "combined_strong"
+    name: "Combined Strong Augmentation"
+    mixup_alpha: 0.3
+    mixup_prob: 0.5
+    cutmix_alpha: 0.8
+    cutmix_prob: 0.3
+    noise_augmentation:
+      gaussian_noise: 0.01
+      noise_prob: 0.4
+    description: "Mixup + CutMix + noise"
+    category: "combined"
+
+# Analysis configuration
+analysis:
+  primary_metric: "iemocap_wa"
+  baseline_wa: 0.708
+  target_wa: 0.72
+  
+  research_questions:
+    - "Which feature-level augmentation works best with emotion2vec?"
+    - "Can augmentation push beyond the 70.8% plateau?"
+    - "What's the optimal augmentation strength for this model?"
+    - "Do combined augmentations provide synergistic benefits?"
+
+  comparison_groups:
+    mixup_comparison: ["baseline_no_aug", "mixup_light", "mixup_medium", "mixup_strong"]
+    noise_comparison: ["baseline_no_aug", "noise_light", "noise_medium", "noise_strong"]
+    cutmix_comparison: ["baseline_no_aug", "cutmix_light", "cutmix_medium"]
+    combined_comparison: ["baseline_no_aug", "combined_light", "combined_medium", "combined_strong"]
+
+# Expected runtime
+estimated_runtime:
+  total_experiments: 14
+  minutes_per_experiment: 240  # 4 hours per experiment
+  total_hours: 56  # ~2.5 days
+
+# Notes
+notes:
+  - "Uses real-time audio processing, not precomputed features"
+  - "All augmentations applied at emotion2vec feature level"
+  - "Based on exact 70.8% WA baseline configuration"
+  - "Target: break through 70.8% plateau with augmentation"
