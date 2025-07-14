@@ -1,0 +1,95 @@
+# Curriculum Pacing Ablation Study - FIXED VERSION
+# All experiments use EXACT same config except curriculum pacing
+
+study_name: "Current_Method_Ablation_curriculum"
+wandb_project: "Current_Method_Ablation_curriculum"
+
+# Template config that achieved 70.8% - ALL experiments inherit this
+template_config: &template
+  learning_rate: 9e-5
+  weight_decay: 5e-6
+  use_curriculum_learning: true
+  use_speaker_disentanglement: true
+  difficulty_method: "pearson_correlation"
+  lr_scheduler: "cosine"
+  focal_loss: true
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  label_smoothing: 0.1
+  num_epochs: 80
+  batch_size: 16
+  class_weights:
+    neutral: 0.8
+    happy: 3.5
+    sad: 1.8
+    anger: 1.6
+  classifier_config:
+    architecture: "simple"
+    hidden_dim: 1536
+    pooling: "attention"
+    layer_norm: true
+    dropout: 0.4
+    input_dropout: 0.2
+
+experiments:
+  # ========================================
+  # BASELINE
+  # ========================================
+  #
+  # - <<: *template
+  #   id: "20_epochs"
+  #   name: "20_epochs"
+  #   curriculum_epochs: 20
+  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
+  #   category: "baseline"
+
+  # - <<: *template
+  #   id: "30_epochs_exponential"
+  #   name: "30_epochs_exponential"
+  #   curriculum_epochs: 30
+  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
+  #   category: "baseline"
+
+  - <<: *template
+    id: "35_epochs_logarithmic"
+    name: "35_epochs_logarithmic"
+    curriculum_epochs: 35
+    description: "Exact replica of label_smoothing config that achieved 70.8%"
+    category: "baseline"
+    curriculum_pacing: "logarithmic"
+
+  - <<: *template
+    id: "35_epochs_logarithmic_quadratic"
+    name: "35_epochs_logarithmic_quadratic"
+    curriculum_epochs: 35
+    description: "Exact replica of label_smoothing config that achieved 70.8%"
+    category: "baseline"
+    curriculum_pacing: "logarithmic"
+    difficulty_method : "baseline_quadratic"
+
+
+  - <<: *template
+    id: "35_epochs_exponential_quadratic"
+    name: "35_epochs_exponential_quadratic"
+    curriculum_epochs: 35
+    description: "Exact replica of label_smoothing config that achieved 70.8%"
+    category: "baseline"
+    difficulty_method : "baseline_quadratic"
+    
+
+
+
+analysis:
+  primary_metric: "iemocap_wa"
+  baseline_wa: 0.708
+  target_wa: 0.72
+  
+  research_questions:
+    - "What is the optimal curriculum pacing for this dataset?"
+    - "Does slower or faster curriculum progression work better?"
+    - "Can non-linear pacing strategies outperform linear?"
+
+estimated_runtime:
+  total_experiments: 15
+  minutes_per_experiment: 240
+  total_hours: 60

@@ -777,7 +777,7 @@ def run_single_experiment(
                 )
                 # Only allow early stopping after epoch 15
                 if (
-                    epoch >= 14 and patience_counter >= config.early_stopping_patience
+                    epoch >= 30 and patience_counter >= config.early_stopping_patience
                 ):  # epoch 14 = 15th epoch (0-indexed)
                     print(f"Early stopping at epoch {epoch+1}")
                     break
@@ -1089,6 +1089,34 @@ def run_single_experiment(
                 "final/cross_corpus/wa_aggregated": cross_aggregated_accuracy,
             }
         )
+        
+        # Add summary metrics for easy access in wandb UI
+        if wandb.run:
+            # Individual session metrics
+            for session in [1, 2, 3, 4, 5]:
+                if session in session_results:
+                    wandb.summary[f"session_{session}_uar"] = session_results[session]["iemocap"]["uar"]
+                    wandb.summary[f"session_{session}_wa"] = session_results[session]["iemocap"]["wa"]
+                    wandb.summary[f"session_{session}_cross_uar"] = session_results[session]["cross_corpus"]["uar"]
+                    wandb.summary[f"session_{session}_cross_wa"] = session_results[session]["cross_corpus"]["accuracy"]
+            
+            # Overall IEMOCAP metrics (per-session averages)
+            wandb.summary["iemocap_uar_mean"] = final_results["iemocap_results"]["uar"]["mean"]
+            wandb.summary["iemocap_uar_std"] = final_results["iemocap_results"]["uar"]["std"]
+            wandb.summary["iemocap_wa_mean"] = final_results["iemocap_results"]["wa"]["mean"]
+            wandb.summary["iemocap_wa_std"] = final_results["iemocap_results"]["wa"]["std"]
+            
+            # Cross-corpus metrics (per-session averages)
+            wandb.summary["cross_corpus_uar_mean"] = final_results["cross_corpus_results"]["uar"]["mean"]
+            wandb.summary["cross_corpus_uar_std"] = final_results["cross_corpus_results"]["uar"]["std"]
+            wandb.summary["cross_corpus_wa_mean"] = final_results["cross_corpus_results"]["accuracy"]["mean"]
+            wandb.summary["cross_corpus_wa_std"] = final_results["cross_corpus_results"]["accuracy"]["std"]
+            
+            # Aggregated metrics
+            wandb.summary["iemocap_uar_aggregated"] = aggregated_uar
+            wandb.summary["iemocap_wa_aggregated"] = aggregated_accuracy
+            wandb.summary["cross_corpus_uar_aggregated"] = cross_aggregated_uar
+            wandb.summary["cross_corpus_wa_aggregated"] = cross_aggregated_accuracy
         wandb.finish()
 
     # Print final summary
