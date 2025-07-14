@@ -798,10 +798,6 @@ def run_single_experiment(
                         ],
                         f"session_{test_session}/val/accuracy": val_metrics["accuracy"],
                         f"session_{test_session}/learning_rate": current_lr,
-                        "epoch": epoch,
-                        "global_step": epoch
-                        + test_session
-                        * config.num_epochs,  # Unique step for proper timeline
                     }
                 )
 
@@ -811,8 +807,6 @@ def run_single_experiment(
                         {
                             "aggregated/val/uar": np.mean(all_uars + [val_metrics["uar"]]),
                             "aggregated/val/wa": np.mean(all_was + [val_metrics["wa"]]),
-                            "epoch": epoch,
-                            "global_step": epoch + test_session * config.num_epochs,
                         }
                     )
 
@@ -1092,6 +1086,9 @@ def run_single_experiment(
         
         # Add summary metrics for easy access in wandb UI
         if wandb.run:
+            # Clear all existing summary metrics to keep it clean
+            wandb.summary.clear()
+            
             # Individual session metrics
             for session in [1, 2, 3, 4, 5]:
                 if session in session_results:
@@ -1111,12 +1108,6 @@ def run_single_experiment(
             wandb.summary["cross_corpus_uar_std"] = final_results["cross_corpus_results"]["uar"]["std"]
             wandb.summary["cross_corpus_wa_mean"] = final_results["cross_corpus_results"]["accuracy"]["mean"]
             wandb.summary["cross_corpus_wa_std"] = final_results["cross_corpus_results"]["accuracy"]["std"]
-            
-            # Aggregated metrics
-            wandb.summary["iemocap_uar_aggregated"] = aggregated_uar
-            wandb.summary["iemocap_wa_aggregated"] = aggregated_accuracy
-            wandb.summary["cross_corpus_uar_aggregated"] = cross_aggregated_uar
-            wandb.summary["cross_corpus_wa_aggregated"] = cross_aggregated_accuracy
         wandb.finish()
 
     # Print final summary
