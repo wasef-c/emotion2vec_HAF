@@ -54,17 +54,19 @@ class Config:
         }
     
     def to_dict(self):
-        """Convert to dictionary for logging"""
-        return {
-            "batch_size": self.batch_size,
-            "num_epochs": self.num_epochs,
-            "learning_rate": self.learning_rate,
-            "weight_decay": self.weight_decay,
-            "lr_scheduler": self.lr_scheduler,
-            "class_weights": self.class_weights,
-            "use_curriculum_learning": self.use_curriculum_learning,
-            "curriculum_epochs": self.curriculum_epochs,
-            "curriculum_pacing": self.curriculum_pacing,
-            "use_speaker_disentanglement": self.use_speaker_disentanglement,
-            "single_test_session": self.single_test_session,
-        }
+        """Convert to dictionary for logging - captures ALL attributes"""
+        config_dict = {}
+        for key, value in self.__dict__.items():
+            # Skip private attributes and make sure values are JSON serializable
+            if not key.startswith('_'):
+                try:
+                    # Convert tensor/numpy arrays to lists for JSON serialization
+                    if hasattr(value, 'tolist'):
+                        config_dict[key] = value.tolist()
+                    elif isinstance(value, (dict, list, str, int, float, bool, type(None))):
+                        config_dict[key] = value
+                    else:
+                        config_dict[key] = str(value)
+                except:
+                    config_dict[key] = str(value)
+        return config_dict

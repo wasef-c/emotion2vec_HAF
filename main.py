@@ -777,7 +777,7 @@ def run_single_experiment(
                 )
                 # Only allow early stopping after epoch 15
                 if (
-                    epoch >= 30 and patience_counter >= config.early_stopping_patience
+                    epoch >= 35 and patience_counter >= config.early_stopping_patience
                 ):  # epoch 14 = 15th epoch (0-indexed)
                     print(f"Early stopping at epoch {epoch+1}")
                     break
@@ -1086,17 +1086,6 @@ def run_single_experiment(
         
         # Add summary metrics for easy access in wandb UI
         if wandb.run:
-            # Clear all existing summary metrics to keep it clean
-            wandb.summary.clear()
-            
-            # Individual session metrics
-            for session in [1, 2, 3, 4, 5]:
-                if session in session_results:
-                    wandb.summary[f"session_{session}_uar"] = session_results[session]["iemocap"]["uar"]
-                    wandb.summary[f"session_{session}_wa"] = session_results[session]["iemocap"]["wa"]
-                    wandb.summary[f"session_{session}_cross_uar"] = session_results[session]["cross_corpus"]["uar"]
-                    wandb.summary[f"session_{session}_cross_wa"] = session_results[session]["cross_corpus"]["accuracy"]
-            
             # Overall IEMOCAP metrics (per-session averages)
             wandb.summary["iemocap_uar_mean"] = final_results["iemocap_results"]["uar"]["mean"]
             wandb.summary["iemocap_uar_std"] = final_results["iemocap_results"]["uar"]["std"]

@@ -30,6 +30,7 @@ template_config: &template
     layer_norm: true
     dropout: 0.4
     input_dropout: 0.2
+  curriculum_epochs: 35
 
 experiments:
   # ========================================
@@ -51,30 +52,27 @@ experiments:
   #   category: "baseline"
 
   - <<: *template
-    id: "35_epochs_logarithmic"
-    name: "35_epochs_logarithmic"
+    id: "35_epochs_PLS"
+    name: "35_epochs_PLS"
     curriculum_epochs: 35
     description: "Exact replica of label_smoothing config that achieved 70.8%"
     category: "baseline"
-    curriculum_pacing: "logarithmic"
 
-  - <<: *template
-    id: "35_epochs_logarithmic_quadratic"
-    name: "35_epochs_logarithmic_quadratic"
-    curriculum_epochs: 35
-    description: "Exact replica of label_smoothing config that achieved 70.8%"
-    category: "baseline"
-    curriculum_pacing: "logarithmic"
-    difficulty_method : "baseline_quadratic"
+  # - <<: *template
+  #   id: "35_epochs_logarithmic"
+  #   name: "35_epochs_logarithmic"
+  #   curriculum_epochs: 30
+  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
+  #   category: "baseline"
+  #   curriculum_pacing: "logarithmic"
 
-
-  - <<: *template
-    id: "35_epochs_exponential_quadratic"
-    name: "35_epochs_exponential_quadratic"
-    curriculum_epochs: 35
-    description: "Exact replica of label_smoothing config that achieved 70.8%"
-    category: "baseline"
-    difficulty_method : "baseline_quadratic"
+  # - <<: *template
+  #   id: "35_epochs_exponential_quadratic"
+  #   name: "35_epochs_exponential_quadratic"
+  #   curriculum_epochs: 35
+  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
+  #   category: "baseline"
+  #   difficulty_method : "baseline_quadratic"
     
 
 
