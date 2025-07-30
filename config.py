@@ -31,15 +31,26 @@ class Config:
         
         # Curriculum learning
         self.use_curriculum_learning = True
-        self.curriculum_epochs = 15
-        self.curriculum_pacing = "exponential"
+        self.curriculum_epochs = 20  # Extended for better curriculum effect
+        self.curriculum_pacing = "sqrt"  # "linear", "exponential", "logarithmic", "sqrt"
+        
         
         # Speaker disentanglement
         self.use_speaker_disentanglement = False
         
+        # Loss function parameters
+        self.use_focal_loss = True
+        self.focal_alpha = 0.25
+        self.focal_gamma = 2.0
+        self.label_smoothing = 0.0
+        self.use_difficulty_scaling = True  # Set to False for standard focal loss ablation
+        
         # Early stopping
         self.early_stopping_patience = 5
         self.early_stopping_min_delta = 0.00001
+        
+        # Training direction configuration
+        self.training_direction = "IEMOCAP_to_MSP"  # "IEMOCAP_to_MSP" or "MSP_to_IEMOCAP"
         
         # Experiment settings
         self.wandb_project = "emotion2vec_difficulty"
@@ -47,10 +58,10 @@ class Config:
         
         # Expected VAD values for difficulty calculation
         self.expected_vad = {
-            0: [2.5, 2.5, 2.5],  # neutral
-            1: [3.8, 3.2, 3.2],  # happy
-            2: [1.8, 2.0, 2.0],  # sad 
-            3: [2.0, 3.8, 3.5],  # anger
+            0: [3, 3, 3],  # neutral
+            1: [4, 4, 4],  # happy
+            2: [2.0, 2.0, 2.0],  # sad 
+            3: [2.0, 4, 3.5],  # anger
         }
     
     def to_dict(self):

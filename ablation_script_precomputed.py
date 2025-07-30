@@ -19,6 +19,7 @@ import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset
 from collections import defaultdict
+import logging
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -85,7 +86,7 @@ class PrecomputedEmotionDataset(Dataset):
             # Get VAD values (handle missing values)
             valence = item.get("valence", None)
             arousal = item.get("arousal", None)
-            domination = item.get("domination", None)
+            domination = item.get("consensus_dominance", None)
 
             data_point = {
                 "features": features,
@@ -117,8 +118,15 @@ class PrecomputedEmotionDataset(Dataset):
                 speaker_id = item["speakerID"]
 
             # CRITICAL FIX: Map speaker_id to proper session (same logic as EmotionDataset)
-            # speakers 1&2→session 1, 3&4→session 2, etc.
-            session = (speaker_id - 1) // 2 + 1
+            if self.dataset_name == "IEMOCAP":
+                # IEMOCAP: speakers 1&2→session 1, 3&4→session 2, etc.
+                session = (speaker_id - 1) // 2 + 1
+            elif self.dataset_name == "MSP-IMPROV":
+                # MSP-IMPROV: speakers 947&948→session 1, 949&950→session 2, etc.
+                session = (speaker_id - 947) // 2 + 1
+            else:
+                # Default fallback
+                session = (speaker_id - 1) // 2 + 1
             
             # Debug tracking
             speaker_ids_seen.add(speaker_id)
@@ -238,8 +246,69 @@ class YamlAblationStudyPrecomputed:
         self.completed_experiments = []
         self.save_progress()
 
+        # Setup logging to file
+        self.log_file = self.study_dir / "ablation_study.log"
+        self.setup_logging()
+
         print(f"📁 Study directory: {self.study_dir}")
+        print(f"📝 Log file: {self.log_file}")
         print(f"⚡ Using precomputed features for faster execution")
+
+    def setup_logging(self):
+        """Setup logging to both file and console, including full terminal output"""
+        # Create logger
+        self.logger = logging.getLogger('ablation_study')
+        self.logger.setLevel(logging.INFO)
+        
+        # Clear any existing handlers
+        self.logger.handlers.clear()
+        
+        # File handler
+        file_handler = logging.FileHandler(self.log_file)
+        file_handler.setLevel(logging.INFO)
+        
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        
+        # Formatter
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        # Add handlers
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+        
+        # Also redirect stdout and stderr to capture ALL terminal output
+        self.terminal_log_file = self.study_dir / "full_terminal_output.log"
+        self.setup_terminal_logging()
+        
+        self.logger.info(f"🚀 Starting ablation study: {self.study_name}")
+        self.logger.info(f"📊 Total experiments: {len(self.experiments)}")
+        self.logger.info(f"📁 Study directory: {self.study_dir}")
+        self.logger.info(f"📝 Full terminal log: {self.terminal_log_file}")
+    
+    def setup_terminal_logging(self):
+        """Redirect stdout and stderr to capture all terminal output"""
+        class TeeOutput:
+            def __init__(self, original, log_file):
+                self.original = original
+                self.log_file = log_file
+                
+            def write(self, text):
+                self.original.write(text)
+                self.original.flush()
+                with open(self.log_file, 'a') as f:
+                    f.write(text)
+                    f.flush()
+                    
+            def flush(self):
+                self.original.flush()
+        
+        # Redirect stdout and stderr
+        sys.stdout = TeeOutput(sys.__stdout__, self.terminal_log_file)
+        sys.stderr = TeeOutput(sys.__stderr__, self.terminal_log_file)
 
     def load_datasets(self):
         """Load datasets once for all experiments"""
@@ -350,15 +419,15 @@ class YamlAblationStudyPrecomputed:
 
     def run_single_experiment(self, experiment):
         """Run a single experiment"""
-        print(f"\n{'='*80}")
-        print(f"🔧 Starting: {experiment['name']}")
-        print(f"📝 Description: {experiment['description']}")
-        print(f"🏷️  Category: {experiment['category']}")
-        print(
+        self.logger.info(f"\n{'='*80}")
+        self.logger.info(f"🔧 Starting: {experiment['name']}")
+        self.logger.info(f"📝 Description: {experiment['description']}")
+        self.logger.info(f"🏷️  Category: {experiment['category']}")
+        self.logger.info(
             f"🔢 Progress: {self.progress['completed_count'] + 1}/{self.progress['total_experiments']}"
         )
-        print(f"⚡ Using precomputed features")
-        print(f"{'='*80}")
+        self.logger.info(f"⚡ Using precomputed features")
+        self.logger.info(f"{'='*80}")
 
         # Update progress
         self.progress["current_experiment"] = experiment["id"]
@@ -366,21 +435,38 @@ class YamlAblationStudyPrecomputed:
         self.save_progress()
 
         # Create config
+        self.logger.info(f"🔍 DEBUG: Creating config for {experiment['id']}")
         config = self.create_experiment_config(experiment)
+        self.logger.info(f"🔍 DEBUG: Config created successfully")
 
         try:
-            # Clean up any existing wandb runs
+            # Clean up any existing wandb runs (only if there's actually an active run)
             try:
-                wandb.finish()
+                if wandb.run is not None:
+                    wandb.finish()
             except:
                 pass
 
             # Run experiment
             start_time = time.time()
+            # Set up datasets based on training direction
+            if config.training_direction == "MSP_to_IEMOCAP":
+                train_dataset_raw = self.msp_dataset
+                test_dataset_raw = self.iemocap_dataset
+                train_dataset_name = "MSP-IMPROV"
+                test_dataset_name = "IEMOCAP"
+            else:
+                train_dataset_raw = self.iemocap_dataset
+                test_dataset_raw = self.msp_dataset
+                train_dataset_name = "IEMOCAP"
+                test_dataset_name = "MSP-IMPROV"
+            
             results = run_single_experiment(
                 config,
-                self.iemocap_dataset,
-                self.msp_dataset,
+                train_dataset_raw,
+                test_dataset_raw,
+                train_dataset_name,
+                test_dataset_name,
                 difficulty_method=experiment.get("difficulty_method", "original"),
                 vad_weights=experiment.get("vad_weights", None),
                 experiment_name=experiment["name"],
@@ -397,14 +483,14 @@ class YamlAblationStudyPrecomputed:
             )
             results["using_precomputed_features"] = True
 
-            self.mark_experiment_completed(experiment, results)
+            self.mark_experiment_completed(experiment, results, train_dataset_name)
             return results
 
         except Exception as e:
             self.mark_experiment_failed(experiment, e)
             raise
 
-    def mark_experiment_completed(self, experiment, results):
+    def mark_experiment_completed(self, experiment, results, train_dataset_name):
         """Mark experiment as completed"""
         experiment["completion_time"] = datetime.now().isoformat()
         experiment["results"] = results
@@ -430,37 +516,58 @@ class YamlAblationStudyPrecomputed:
                 indent=2,
             )
 
-        print(f"✅ Completed: {experiment['name']}")
+        self.logger.info(f"✅ Completed: {experiment['name']}")
 
         # Show quick results
-        iemocap_wa = results["iemocap_results"]["wa"]["mean"]
-        iemocap_uar = results["iemocap_results"]["uar"]["mean"]
+        # Get training dataset results dynamically 
+        train_dataset_name_lower = train_dataset_name.lower()
+        loso_key = f"{train_dataset_name_lower}_loso_results"
+        
+        # Try the new dynamic key first, fallback to old hardcoded key for backward compatibility
+        if loso_key in results:
+            loso_wa = results[loso_key]["wa"]["mean"]
+            loso_uar = results[loso_key]["uar"]["mean"]
+        elif "iemocap_results" in results:
+            # Backward compatibility
+            loso_wa = results["iemocap_results"]["wa"]["mean"]
+            loso_uar = results["iemocap_results"]["uar"]["mean"]
+        else:
+            # Last resort - try to find any _loso_results key
+            loso_keys = [k for k in results.keys() if k.endswith('_loso_results')]
+            if loso_keys:
+                loso_key = loso_keys[0]
+                loso_wa = results[loso_key]["wa"]["mean"]
+                loso_uar = results[loso_key]["uar"]["mean"]
+            else:
+                print("⚠️  WARNING: Could not find LOSO results in results dictionary!")
+                loso_wa = 0.0
+                loso_uar = 0.0
         cross_wa = results["cross_corpus_results"]["accuracy"]["mean"]
         cross_uar = results["cross_corpus_results"]["uar"]["mean"]
 
-        print(f"   📊 IEMOCAP WA: {iemocap_wa:.4f} | UAR: {iemocap_uar:.4f}")
-        print(f"   🌐 Cross-Corpus WA: {cross_wa:.4f} | UAR: {cross_uar:.4f}")
-        print(f"   ⏱️  Duration: {results['experiment_duration_minutes']:.1f} minutes")
-        print(f"   ⚡ Speed improvement from precomputed features!")
+        self.logger.info(f"   📊 {train_dataset_name} LOSO WA: {loso_wa:.4f} | UAR: {loso_uar:.4f}")
+        self.logger.info(f"   🌐 Cross-Corpus WA: {cross_wa:.4f} | UAR: {cross_uar:.4f}")
+        self.logger.info(f"   ⏱️  Duration: {results['experiment_duration_minutes']:.1f} minutes")
+        self.logger.info(f"   ⚡ Speed improvement from precomputed features!")
 
         # Compare to expected results if available
         exp_id = experiment["id"]
         if exp_id in self.expected_results:
             expected = self.expected_results[exp_id]
-            print(f"   📈 Comparison to previous:")
+            self.logger.info(f"   📈 Comparison to previous:")
             if "iemocap_wa" in expected:
-                diff_wa = iemocap_wa - expected["iemocap_wa"]
-                print(
-                    f"      WA: {iemocap_wa:.4f} vs {expected['iemocap_wa']:.4f} ({diff_wa:+.4f})"
+                diff_wa = loso_wa - expected["iemocap_wa"]
+                self.logger.info(
+                    f"      WA: {loso_wa:.4f} vs {expected['iemocap_wa']:.4f} ({diff_wa:+.4f})"
                 )
             if "iemocap_uar" in expected:
-                diff_uar = iemocap_uar - expected["iemocap_uar"]
-                print(
-                    f"      UAR: {iemocap_uar:.4f} vs {expected['iemocap_uar']:.4f} ({diff_uar:+.4f})"
+                diff_uar = loso_uar - expected["iemocap_uar"]
+                self.logger.info(
+                    f"      UAR: {loso_uar:.4f} vs {expected['iemocap_uar']:.4f} ({diff_uar:+.4f})"
                 )
             if "cross_uar" in expected:
                 diff_cross = cross_uar - expected["cross_uar"]
-                print(
+                self.logger.info(
                     f"      Cross-UAR: {cross_uar:.4f} vs {expected['cross_uar']:.4f} ({diff_cross:+.4f})"
                 )
 
@@ -479,13 +586,13 @@ class YamlAblationStudyPrecomputed:
         self.progress["current_experiment"] = None
         self.save_progress()
 
-        print(f"❌ Failed: {experiment['name']}")
-        print("=" * 80)
-        print(f"Error Type: {type(error).__name__}")
-        print(f"Error Message: {str(error)}")
-        print("\nFull Traceback:")
-        print(full_traceback)
-        print("=" * 80)
+        self.logger.error(f"❌ Failed: {experiment['name']}")
+        self.logger.error("=" * 80)
+        self.logger.error(f"Error Type: {type(error).__name__}")
+        self.logger.error(f"Error Message: {str(error)}")
+        self.logger.error("\nFull Traceback:")
+        self.logger.error(full_traceback)
+        self.logger.error("=" * 80)
 
     def run_ablation_study(self, max_failures_per_experiment=2):
         """Run the complete ablation study"""
@@ -513,8 +620,10 @@ class YamlAblationStudyPrecomputed:
                 continue
 
             try:
+                self.logger.info(f"🔍 DEBUG: About to start experiment {experiment['id']}")
                 self.run_single_experiment(experiment)
                 remaining_experiments.pop(0)
+                self.logger.info(f"✅ DEBUG: Successfully completed experiment {experiment['id']}")
 
             except KeyboardInterrupt:
                 print(f"\n🛑 Study interrupted by user")
@@ -524,7 +633,14 @@ class YamlAblationStudyPrecomputed:
                 return
 
             except Exception as e:
-                print(f"💥 Experiment failed, continuing...")
+                self.logger.error(f"💥 Experiment failed, continuing...")
+                self.logger.error(f"🔍 ERROR DETAILS:")
+                self.logger.error(f"   Error Type: {type(e).__name__}")
+                self.logger.error(f"   Error Message: {str(e)}")
+                import traceback
+                self.logger.error(f"   Traceback: {traceback.format_exc()}")
+                # Note: mark_experiment_failed is called inside run_single_experiment
+                # Don't remove from queue yet - let the failure count logic handle it
                 continue
 
         # Study completed
@@ -535,6 +651,18 @@ class YamlAblationStudyPrecomputed:
         self.save_progress()
 
         self.analyze_results()
+
+    def get_loso_key_from_results(self, results):
+        # \"\"\"Helper to find the correct LOSO results key from experiment results\"\"\"
+        # First try to find any _loso_results key
+        loso_keys = [k for k in results.keys() if k.endswith('_loso_results')]
+        if loso_keys:
+            return loso_keys[0]
+        # Fallback to old hardcoded key
+        elif "iemocap_results" in results:
+            return "iemocap_results"
+        else:
+            return None
 
     def analyze_results(self):
         """Analyze and summarize results"""
@@ -556,10 +684,16 @@ class YamlAblationStudyPrecomputed:
         # Get primary metric for ranking
         primary_metric = self.analysis_config.get("primary_metric", "iemocap_wa")
 
-        # Find best performers
+        # Find best performers using dynamic keys
+        def get_loso_wa(exp):
+            loso_key = self.get_loso_key_from_results(exp["results"])
+            if loso_key and loso_key in exp["results"]:
+                return exp["results"][loso_key]["wa"]["mean"]
+            return 0.0
+        
         best_overall = max(
             self.completed_experiments,
-            key=lambda x: x["results"]["iemocap_results"]["wa"]["mean"],
+            key=get_loso_wa,
         )
 
         best_cross = max(
@@ -568,8 +702,13 @@ class YamlAblationStudyPrecomputed:
         )
 
         print(f"\n🥇 BEST PERFORMERS:")
+        best_loso_key = self.get_loso_key_from_results(best_overall["results"])
+        if best_loso_key and best_loso_key in best_overall["results"]:
+            best_wa = best_overall["results"][best_loso_key]["wa"]["mean"]
+        else:
+            best_wa = 0.0
         print(
-            f"Best Overall (WA): {best_overall['name']} - {best_overall['results']['iemocap_results']['wa']['mean']:.4f}"
+            f"Best Overall (WA): {best_overall['name']} - {best_wa:.4f}"
         )
         print(
             f"Best Cross-Corpus: {best_cross['name']} - {best_cross['results']['cross_corpus_results']['uar']['mean']:.4f}"
@@ -579,18 +718,26 @@ class YamlAblationStudyPrecomputed:
         print(f"\n📈 TOP 3 OVERALL (by WA):")
         sorted_by_wa = sorted(
             self.completed_experiments,
-            key=lambda x: x["results"]["iemocap_results"]["wa"]["mean"],
+            key=get_loso_wa,
             reverse=True,
         )
 
         for i, exp in enumerate(sorted_by_wa[:3]):
             results = exp["results"]
+            loso_key = self.get_loso_key_from_results(results)
             print(f"   {i+1}. {exp['name']}")
-            print(f"      WA: {results['iemocap_results']['wa']['mean']:.4f}")
-            print(f"      UAR: {results['iemocap_results']['uar']['mean']:.4f}")
-            print(
-                f"      Cross-UAR: {results['cross_corpus_results']['uar']['mean']:.4f}"
-            )
+            if loso_key and loso_key in results:
+                print(f"      WA: {results[loso_key]['wa']['mean']:.4f}")
+                print(f"      UAR: {results[loso_key]['uar']['mean']:.4f}")
+            else:
+                print(f"      WA: N/A (missing LOSO results)")
+                print(f"      UAR: N/A (missing LOSO results)")
+            if "cross_corpus_results" in results:
+                print(
+                    f"      Cross-UAR: {results['cross_corpus_results']['uar']['mean']:.4f}"
+                )
+            else:
+                print(f"      Cross-UAR: N/A (missing cross-corpus results)")
             print(f"      Category: {exp['category']}")
 
         # Speaker effect analysis
@@ -612,8 +759,14 @@ class YamlAblationStudyPrecomputed:
 
         for base_name, pair in speaker_pairs.items():
             if pair["without"] and pair["with"]:
-                without_wa = pair["without"]["results"]["iemocap_results"]["wa"]["mean"]
-                with_wa = pair["with"]["results"]["iemocap_results"]["wa"]["mean"]
+                without_loso_key = self.get_loso_key_from_results(pair["without"]["results"])
+                with_loso_key = self.get_loso_key_from_results(pair["with"]["results"])
+                
+                if without_loso_key and with_loso_key:
+                    without_wa = pair["without"]["results"][without_loso_key]["wa"]["mean"]
+                    with_wa = pair["with"]["results"][with_loso_key]["wa"]["mean"]
+                else:
+                    continue  # Skip if we can't find the results
                 improvement = with_wa - without_wa
 
                 print(f"   {base_name}:")

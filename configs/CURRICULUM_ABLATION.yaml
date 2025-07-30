@@ -1,8 +1,8 @@
-# Curriculum Pacing Ablation Study - FIXED VERSION
-# All experiments use EXACT same config except curriculum pacing
+# Difficulty Scaling Focal Loss Ablation Study
+# All experiments use EXACT same config except difficulty scaling
 
-study_name: "Current_Method_Ablation_curriculum"
-wandb_project: "Current_Method_Ablation_curriculum"
+study_name: "difficulty_scaling_ablation"
+wandb_project: "Difficulty_analysis_IEMO_v3.0"
 
 # Template config that achieved 70.8% - ALL experiments inherit this
 template_config: &template
@@ -10,14 +10,13 @@ template_config: &template
   weight_decay: 5e-6
   use_curriculum_learning: true
   use_speaker_disentanglement: true
-  difficulty_method: "pearson_correlation"
-  lr_scheduler: "cosine"
+  difficulty_method: "euclidean_distance"
   focal_loss: true
   focal_alpha: 0.25
-  focal_gamma: 2.0
+  focal_gamma: 1.0
   label_smoothing: 0.1
   num_epochs: 80
-  batch_size: 16
+  batch_size: 32
   class_weights:
     neutral: 0.8
     happy: 3.5
@@ -31,40 +30,70 @@ template_config: &template
     dropout: 0.4
     input_dropout: 0.2
   curriculum_epochs: 35
+  curriculum_pacing: "exponential"
+  use_difficulty_scaling: true  # New parameter for ablation
+  training_direction: "IEMOCAP_to_MSP"
+  # training_direction: "MSP_to_IEMOCAP"  # "IEMOCAP_to_MSP" or "MSP_to_IEMOCAP"
 
 experiments:
-  # ========================================
-  # BASELINE
-  # ========================================
-  #
-  # - <<: *template
-  #   id: "20_epochs"
-  #   name: "20_epochs"
-  #   curriculum_epochs: 20
-  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
-  #   category: "baseline"
+
+  # ========== DIFFICULTY SCALING ABLATION ==========
+  
+  - <<: *template
+    id: "diff_scaling_on_curriculum_on"
+    name: "Difficulty Scaling + Curriculum + SD"
+    description: "Full setup: difficulty-scaled focal loss + curriculum learning"
+    category: "full_method"
+    use_difficulty_scaling: true
+    use_curriculum_learning: true
+    use_speaker_disentanglement: true
 
   # - <<: *template
-  #   id: "30_epochs_exponential"
-  #   name: "30_epochs_exponential"
-  #   curriculum_epochs: 30
-  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
-  #   category: "baseline"
+  #   id: "diff_scaling_off_curriculum_on"
+  #   name: "Standard Focal + Curriculum"
+  #   description: "Standard focal loss + curriculum learning (no difficulty scaling)"
+  #   category: "ablation"
+  #   use_difficulty_scaling: false
+  #   use_curriculum_learning: true
+  #   use_speaker_disentanglement: true
 
   - <<: *template
-    id: "35_epochs_PLS"
-    name: "35_epochs_PLS"
-    curriculum_epochs: 35
-    description: "Exact replica of label_smoothing config that achieved 70.8%"
-    category: "baseline"
+    id: "diff_scaling_on_curriculum_off"
+    name: "Difficulty Scaling Only"
+    description: "Difficulty-scaled focal loss without curriculum learning"
+    category: "ablation"
+    use_difficulty_scaling: true
+    use_curriculum_learning: false
+    use_speaker_disentanglement: true
 
   # - <<: *template
-  #   id: "35_epochs_logarithmic"
-  #   name: "35_epochs_logarithmic"
-  #   curriculum_epochs: 30
-  #   description: "Exact replica of label_smoothing config that achieved 70.8%"
+  #   id: "diff_scaling_off_curriculum_off"
+  #   name: "Standard Focal Only"
+  #   description: "Standard focal loss without curriculum learning (baseline)"
   #   category: "baseline"
-  #   curriculum_pacing: "logarithmic"
+  #   use_difficulty_scaling: false
+  #   use_curriculum_learning: false
+  #   use_speaker_disentanglement: true
+
+  # # ========== ADDITIONAL CONTROLS ==========
+
+  - <<: *template
+    id: "Difficulty Scaling + Curriculum"
+    name: "Difficulty Scaling + Curriculum"
+    description: "Full method but without speaker disentanglement"
+    category: "control"
+    use_difficulty_scaling: true
+    use_curriculum_learning: true
+    use_speaker_disentanglement: false 
+
+  - <<: *template
+    id: "Baseline"
+    name: "Baseline"
+    description: "Exact replica of label_smoothing config that achieved 70.8%"
+    category: "baseline"
+    use_difficulty_scaling: false
+    use_curriculum_learning: false
+    use_speaker_disentanglement: false 
 
   # - <<: *template
   #   id: "35_epochs_exponential_quadratic"
@@ -83,11 +112,12 @@ analysis:
   target_wa: 0.72
   
   research_questions:
-    - "What is the optimal curriculum pacing for this dataset?"
-    - "Does slower or faster curriculum progression work better?"
-    - "Can non-linear pacing strategies outperform linear?"
+    - "Does difficulty-scaled focal loss improve performance over standard focal loss?"
+    - "How much does curriculum learning contribute vs difficulty scaling?"
+    - "Do curriculum learning and difficulty scaling work synergistically?"
+    - "Is the new difficulty rescaling (percentile + sigmoid) effective?"
 
 estimated_runtime:
-  total_experiments: 15
+  total_experiments: 5
   minutes_per_experiment: 240
-  total_hours: 60
+  total_hours: 20

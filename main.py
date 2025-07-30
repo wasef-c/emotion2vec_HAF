@@ -17,7 +17,7 @@ import os
 # CRITICAL: Set deterministic behavior IMMEDIATELY at import time
 def force_deterministic_behavior():
     """Force deterministic behavior with maximum settings"""
-    seed = 42
+    seed = 238
     
     print(f"🎲 FORCING DETERMINISTIC BEHAVIOR (seed={seed})")
     
@@ -62,10 +62,18 @@ from functions import (
     train_epoch,
     evaluate,
     get_session_splits,
+    get_speaker_splits,
     create_train_val_test_splits,
+    create_msp_train_val_splits,
+    create_msp_speaker_train_val_splits,
+    create_subset_dataset,
     apply_custom_difficulty,
     create_data_loader,
     calculate_metrics,
+    difficulty_plot,
+    difficulty_analysis,
+    confidence_vs_difficulty_analysis,
+    confidence_vs_difficulty_session_analysis,
 )
 
 
@@ -115,8 +123,10 @@ def set_all_seeds(seed=42):
 
 def run_single_experiment(
     config,
-    iemocap_dataset,
-    msp_dataset,
+    train_dataset_raw,
+    test_dataset_raw,
+    train_dataset_name,
+    test_dataset_name,
     difficulty_method=None,
     vad_weights=None,
     experiment_name=None,
@@ -141,18 +151,50 @@ def run_single_experiment(
     print(f"Device: {device}")
     print(f"Difficulty method: {difficulty_method or 'original'}")
 
-    # Get session splits
-    session_splits = get_session_splits(iemocap_dataset)
-
-    # Determine test sessions
-    if config.single_test_session:
-        test_sessions = [config.single_test_session]
-        print(
-            f"🎯 Single session mode: Testing on session {config.single_test_session}"
-        )
+    # Get splits for LOSO evaluation
+    if config.training_direction == "IEMOCAP_to_MSP":
+        # IEMOCAP training with sessions, MSP testing
+        session_splits = get_session_splits(train_dataset_raw)
+        if config.single_test_session:
+            test_sessions = [config.single_test_session]
+            print(
+                f"🎯 Single session mode: Testing on session {config.single_test_session}"
+            )
+        else:
+            test_sessions = list(session_splits.keys())
+            print(f"🔄 Full LOSO mode: Testing on sessions {test_sessions}")
+    elif config.training_direction == "MSP_to_IEMOCAP":
+        # MSP training with sessions for LOSO, IEMOCAP testing
+        session_splits = get_session_splits(train_dataset_raw)  # Get MSP sessions for LOSO
+        if config.single_test_session:
+            test_sessions = [config.single_test_session]
+            print(
+                f"🎯 Single session mode: Testing MSP session {config.single_test_session}"
+            )
+        else:
+            test_sessions = list(session_splits.keys())
+            print(f"🔄 Full LOSO mode: Testing on MSP sessions {test_sessions}")
     else:
-        test_sessions = list(session_splits.keys())
-        print(f"🔄 Full LOSO mode: Testing on sessions {test_sessions}")
+        # Default fallback
+        test_sessions = [1]  # Dummy session for single iteration
+        print(f"🔄 Default mode: Single iteration")
+
+    # Apply custom difficulty calculation if specified (once per experiment)
+    if difficulty_method and difficulty_method != "original":
+        print(f"🔧 Applying {difficulty_method} to training dataset ({train_dataset_name})")
+        apply_custom_difficulty(
+            train_dataset_raw,
+            difficulty_method,
+            config.expected_vad,
+            vad_weights,
+        )
+        print(f"🔧 Applying {difficulty_method} to test dataset ({test_dataset_name})")
+        apply_custom_difficulty(
+            test_dataset_raw,
+            difficulty_method,
+            config.expected_vad,
+            vad_weights,
+        )
 
     # Store results
     all_results = []
@@ -167,38 +209,42 @@ def run_single_experiment(
         print(f"\n{'='*60}")
         print(f"Leave-One-Session-Out: Testing on Session {test_session}")
         print(f"{'='*60}")
-
-        # Create splits using simplified function
-        train_indices, val_indices, test_indices = create_train_val_test_splits(
-            iemocap_dataset, test_session, val_ratio=0.2
-        )
+        
+        # Create train/val/test splits based on training direction
+        if config.training_direction == "MSP_to_IEMOCAP":
+            # MSP training with session-based LOSO, IEMOCAP testing (all data)
+            train_indices, val_indices, msp_test_indices = create_train_val_test_splits(
+                train_dataset_raw, test_session, val_ratio=0.2
+            )
+            # Test on all IEMOCAP data (cross-corpus evaluation)
+            test_indices = list(range(len(test_dataset_raw.data)))
+            print(f"   IEMOCAP Test (all data): {len(test_indices)} samples")
+        else:
+            # IEMOCAP training (with sessions), MSP testing
+            train_indices, val_indices, iemocap_test_indices = create_train_val_test_splits(
+                train_dataset_raw, test_session, val_ratio=0.2
+            )
+            test_indices = list(range(len(test_dataset_raw.data)))
 
         print(
-            f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)}"
+            f"{train_dataset_name} Train: {len(train_indices)}, {train_dataset_name} Val: {len(val_indices)}, {test_dataset_name} Test: {len(test_indices)}"
         )
 
         # Debug: Check if indices are valid
         print(f"Sample train indices: {train_indices[:10]}")
-        print(f"Dataset size: {len(iemocap_dataset)}")
+        print(f"{train_dataset_name} dataset size: {len(train_dataset_raw)}")
+        print(f"{test_dataset_name} dataset size: {len(test_dataset_raw)}")
 
-        # Create datasets
-        train_dataset = Subset(iemocap_dataset, train_indices)
-        val_dataset = Subset(iemocap_dataset, val_indices)
-        test_dataset = Subset(iemocap_dataset, test_indices)
+        # Create datasets based on configuration
+        train_dataset = Subset(train_dataset_raw, train_indices)
+        val_dataset = Subset(train_dataset_raw, val_indices)
+        test_dataset = Subset(test_dataset_raw, test_indices)
 
         print(
             f"Actual subset sizes - Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
         )
 
-        # Apply custom difficulty calculation if specified
-        if difficulty_method and difficulty_method != "original":
-            apply_custom_difficulty(
-                iemocap_dataset,
-                train_indices,
-                difficulty_method,
-                config.expected_vad,
-                vad_weights,
-            )
+        
 
         # Create data loaders
         train_loader = create_data_loader(train_dataset, config, is_training=True)
@@ -641,6 +687,9 @@ def run_single_experiment(
         focal_gamma = getattr(config, 'focal_gamma', 2.0)
         label_smoothing = getattr(config, 'label_smoothing', 0.0)
         
+        # Check if we should use difficulty scaling
+        use_difficulty_scaling = getattr(config, 'use_difficulty_scaling', True)
+        
         criterion = AdaptiveSaliencyLoss(
             class_weights=class_weights, 
             saliency_weight=0.0, 
@@ -648,7 +697,8 @@ def run_single_experiment(
             use_focal_loss=use_focal_loss,
             focal_alpha=focal_alpha,
             focal_gamma=focal_gamma,
-            label_smoothing=label_smoothing
+            label_smoothing=label_smoothing,
+            use_difficulty_scaling=use_difficulty_scaling
         )
         optimizer = optim.AdamW(
             model.parameters(),
@@ -690,6 +740,9 @@ def run_single_experiment(
         patience_counter = 0
 
         for epoch in range(config.num_epochs):
+            # Initialize curriculum_epochs to avoid UnboundLocalError
+            curriculum_epochs = 0
+            
             # Update curriculum sampler epoch
             if hasattr(train_loader.sampler, "set_epoch"):
                 train_loader.sampler.set_epoch(epoch)
@@ -699,7 +752,7 @@ def run_single_experiment(
                     sampler = train_loader.sampler
                     epoch_progress = min(1.0, epoch / sampler.curriculum_epochs)
                     progress = sampler._calculate_progress(epoch_progress)
-
+                    curriculum_epochs = sampler.curriculum_epochs
                     if epoch < sampler.curriculum_epochs:
                         if hasattr(sampler, 'start_percentile'):
                             # Smooth quantile-based progression
@@ -742,7 +795,8 @@ def run_single_experiment(
                                 f"session_{test_session}/curriculum_progress": progress,
                             }
                         )
-
+                else:
+                    curriculum_epochs = 0
             # Train
             model.train()  # Ensure training mode
             train_metrics = train_epoch(
@@ -771,14 +825,12 @@ def run_single_experiment(
                 best_model_state = model.state_dict().copy()
                 print(f"Val UAR: {val_metrics['uar']:.4f} ⭐ NEW BEST")
             else:
-                patience_counter += 1
+                if epoch >= curriculum_epochs:
+                    patience_counter += 1
                 print(
                     f"Val UAR: {val_metrics['uar']:.4f} (Best: {best_val_uar:.4f}, Patience: {patience_counter}/{config.early_stopping_patience})"
                 )
-                # Only allow early stopping after epoch 15
-                if (
-                    epoch >= 35 and patience_counter >= config.early_stopping_patience
-                ):  # epoch 14 = 15th epoch (0-indexed)
+                if patience_counter >= config.early_stopping_patience:
                     print(f"Early stopping at epoch {epoch+1}")
                     break
 
@@ -814,14 +866,25 @@ def run_single_experiment(
         if best_model_state:
             model.load_state_dict(best_model_state)
 
-        # Test evaluation
-        print(f"\nFinal evaluation on Session {test_session}...")
-        test_metrics, test_preds, test_labels, test_speaker_ids = evaluate(model, test_loader, criterion, device, return_predictions=True)
+        # Cross-corpus evaluation on different dataset
+        print(f"\nCross-corpus evaluation on {test_dataset_name}...")
+        cross_metrics, cross_preds, cross_labels, cross_speaker_ids, cross_difficulties, cross_logits = evaluate(model, test_loader, criterion, device, return_predictions=True, return_logits=True)
 
-        # Cross-corpus evaluation
-        print("Cross-corpus evaluation on MSP-IMPROV...")
-        msp_loader = create_data_loader(msp_dataset, config, is_training=False)
-        msp_metrics, msp_preds, msp_labels, msp_speaker_ids = evaluate(model, msp_loader, criterion, device, return_predictions=True)
+        # LOSO in-domain evaluation on held-out session from training dataset
+        if config.training_direction == "IEMOCAP_to_MSP":
+            # Create test set from held-out IEMOCAP session
+            loso_test_indices = [i for i in range(len(train_dataset_raw.data)) if train_dataset_raw.data[i]["session"] == test_session]
+            loso_test_dataset = create_subset_dataset(train_dataset_raw, loso_test_indices)
+            loso_test_loader = create_data_loader(loso_test_dataset, config, is_training=False)
+            print(f"LOSO in-domain evaluation on {train_dataset_name} session {test_session} ({len(loso_test_indices)} samples)...")
+        else:
+            # MSP_to_IEMOCAP: Create test set from held-out MSP session  
+            loso_test_indices = [i for i in range(len(train_dataset_raw.data)) if train_dataset_raw.data[i]["session"] == test_session]
+            loso_test_dataset = create_subset_dataset(train_dataset_raw, loso_test_indices) 
+            loso_test_loader = create_data_loader(loso_test_dataset, config, is_training=False)
+            print(f"LOSO in-domain evaluation on {train_dataset_name} session {test_session} ({len(loso_test_indices)} samples)...")
+        
+        loso_metrics, loso_preds, loso_labels, loso_speaker_ids, loso_difficulties, loso_logits = evaluate(model, loso_test_loader, criterion, device, return_predictions=True, return_logits=True)
         
         # Enhanced per-session wandb logging
         if wandb.run:
@@ -830,95 +893,102 @@ def run_single_experiment(
             import matplotlib.pyplot as plt
             import seaborn as sns
             
-            # Create confusion matrices for this session
-            session_cm = confusion_matrix(test_labels, test_preds, labels=[0, 1, 2, 3])
-            cross_cm = confusion_matrix(msp_labels, msp_preds, labels=[0, 1, 2, 3])
+            # Create confusion matrices based on configuration
+            cross_corpus_cm = confusion_matrix(cross_labels, cross_preds, labels=[0, 1, 2, 3])
+            difficulty_plot_cross = difficulty_plot(cross_preds, cross_labels, cross_difficulties, f"{test_dataset_name}-CrossCorpus")
+            
+            # Add difficulty analysis for cross-corpus
+            cross_difficulty_plots = difficulty_analysis(cross_difficulties, cross_labels, f"{test_dataset_name}-CrossCorpus")
+
+            loso_cm = confusion_matrix(loso_labels, loso_preds, labels=[0, 1, 2, 3])
+            difficulty_plot_loso = difficulty_plot(loso_preds, loso_labels, loso_difficulties, f"{train_dataset_name}-LOSO-S{test_session}")
+            
+            # Add difficulty analysis for LOSO
+            loso_difficulty_plots = difficulty_analysis(loso_difficulties, loso_labels, f"{train_dataset_name}-LOSO-S{test_session}")
+            
+            # Per-session confidence analysis
+            cross_confidence_plot = confidence_vs_difficulty_session_analysis(
+                cross_logits, cross_difficulties, cross_labels, cross_preds, f"{test_dataset_name}-CrossCorpus-S{test_session}"
+            )
+            loso_confidence_plot = confidence_vs_difficulty_session_analysis(
+                loso_logits, loso_difficulties, loso_labels, loso_preds, f"{train_dataset_name}-LOSO-S{test_session}"
+            )
+
             
             # Calculate metrics for session and cross-corpus
             from sklearn.metrics import accuracy_score, balanced_accuracy_score
-            session_wa = accuracy_score(test_labels, test_preds)
-            session_uar = balanced_accuracy_score(test_labels, test_preds)
-            cross_wa = accuracy_score(msp_labels, msp_preds)
-            cross_uar = balanced_accuracy_score(msp_labels, msp_preds)
+            cross_wa = accuracy_score(cross_labels, cross_preds)
+            cross_uar = balanced_accuracy_score(cross_labels, cross_preds)
+            loso_wa = accuracy_score(loso_labels, loso_preds)
+            loso_uar = balanced_accuracy_score(loso_labels, loso_preds)
             
-            # Create speaker-specific confusion matrices
-            unique_speakers = list(set(test_speaker_ids))
-            speaker_cms = {}
-            speaker_metrics = {}
-            for speaker_id in unique_speakers:
-                speaker_mask = [i for i, s in enumerate(test_speaker_ids) if s == speaker_id]
-                if len(speaker_mask) > 0:
-                    speaker_labels = [test_labels[i] for i in speaker_mask]
-                    speaker_preds = [test_preds[i] for i in speaker_mask]
-                    speaker_cm = confusion_matrix(speaker_labels, speaker_preds, labels=[0, 1, 2, 3])
-                    speaker_cms[speaker_id] = speaker_cm
-                    
-                    # Calculate speaker-specific metrics
-                    speaker_wa = accuracy_score(speaker_labels, speaker_preds)
-                    speaker_uar = balanced_accuracy_score(speaker_labels, speaker_preds)
-                    speaker_metrics[speaker_id] = {'wa': speaker_wa, 'uar': speaker_uar}
+            # Speaker-specific analysis removed - not needed for main analysis
             
             # Plot and log session confusion matrix
+            # Plot cross-corpus confusion matrix
             plt.figure(figsize=(8, 6))
-            sns.heatmap(session_cm, annot=True, fmt='d', cmap='Blues', 
+            sns.heatmap(cross_corpus_cm, annot=True, fmt='d', cmap='Blues', 
                        xticklabels=["Neutral", "Happy", "Sad", "Anger"], yticklabels=["Neutral", "Happy", "Sad", "Anger"])
-            plt.title(f'Session {test_session} Confusion Matrix\nWA: {session_wa:.4f}, UAR: {session_uar:.4f}')
+            plt.title(f'Cross-Corpus ({train_dataset_name}→{test_dataset_name}) Session {test_session}\nWA: {cross_wa:.4f}, UAR: {cross_uar:.4f}')
             plt.ylabel('True Label')
             plt.xlabel('Predicted Label')
-            session_cm_img = wandb.Image(plt)
+            cross_corpus_cm_img = wandb.Image(plt)
             plt.close()
+
             
-            # Plot and log cross-corpus confusion matrix
+            # Plot LOSO confusion matrix (held-out session)
             plt.figure(figsize=(8, 6))
-            sns.heatmap(cross_cm, annot=True, fmt='d', cmap='Oranges',
+            sns.heatmap(loso_cm, annot=True, fmt='d', cmap='Oranges',
                        xticklabels=["Neutral", "Happy", "Sad", "Anger"], yticklabels=["Neutral", "Happy", "Sad", "Anger"])
-            plt.title(f'Session {test_session} Cross-Corpus Confusion Matrix\nWA: {cross_wa:.4f}, UAR: {cross_uar:.4f}')
+            plt.title(f'LOSO In-Domain ({train_dataset_name} Session {test_session})\nWA: {loso_wa:.4f}, UAR: {loso_uar:.4f}')
             plt.ylabel('True Label')
             plt.xlabel('Predicted Label')
-            cross_cm_img = wandb.Image(plt)
+            loso_cm_img = wandb.Image(plt)
             plt.close()
             
-            # Plot and log speaker-specific confusion matrices
-            speaker_cm_images = {}
-            for speaker_id, speaker_cm in speaker_cms.items():
-                speaker_wa = speaker_metrics[speaker_id]['wa']
-                speaker_uar = speaker_metrics[speaker_id]['uar']
-                plt.figure(figsize=(6, 5))
-                sns.heatmap(speaker_cm, annot=True, fmt='d', cmap='Greens',
-                           xticklabels=["Neutral", "Happy", "Sad", "Anger"], yticklabels=["Neutral", "Happy", "Sad", "Anger"])
-                plt.title(f'Session {test_session} Speaker {speaker_id} Confusion Matrix\nWA: {speaker_wa:.4f}, UAR: {speaker_uar:.4f}')
-                plt.ylabel('True Label')
-                plt.xlabel('Predicted Label')
-                speaker_cm_images[f'speaker_{speaker_id}'] = wandb.Image(plt)
-                plt.close()
+            # Speaker-specific analysis removed for cleaner logging
             
-            # Log only essential results and confusion matrices
+            
+            
+            
+            
+            # Log only essential results and confusion matrices  
             log_dict = {
-                # Core metrics only
-                f"session_{test_session}/wa": test_metrics["wa"],
-                f"session_{test_session}/uar": test_metrics["uar"],
-                f"session_{test_session}/cross_corpus_uar": msp_metrics["uar"],
+                # Core metrics - LOSO is in-domain, other dataset is cross-corpus
+                f"session_{test_session}/loso_wa": loso_metrics["wa"],
+                f"session_{test_session}/loso_uar": loso_metrics["uar"],
+                f"session_{test_session}/cross_corpus_wa": cross_metrics["wa"],
+                f"session_{test_session}/cross_corpus_uar": cross_metrics["uar"],
                 
-                # Confusion matrices (main focus)
-                f"session_{test_session}/cm_session": session_cm_img,
-                f"session_{test_session}/cm_cross": cross_cm_img,
+                # Confusion matrices and difficulty plots
+                f"session_{test_session}/cm_cross_corpus": cross_corpus_cm_img,
+                f"session_{test_session}/cm_loso": loso_cm_img,
+                f"session_{test_session}/difficulty_cross_corpus": difficulty_plot_cross,
+                f"session_{test_session}/difficulty_loso": difficulty_plot_loso,
+                
+                # Confidence analysis plots
+                f"session_{test_session}/confidence_cross_corpus": cross_confidence_plot,
+                f"session_{test_session}/confidence_loso": loso_confidence_plot,
+
+                # Add difficulty analysis plots
+                **cross_difficulty_plots,
+                **loso_difficulty_plots,
+
             }
             
-            # Add only the speaker confusion matrices (no extra metadata)
-            for speaker_key, speaker_img in speaker_cm_images.items():
-                log_dict[f"session_{test_session}/cm_{speaker_key}"] = speaker_img
+            # Speaker confusion matrices removed - cleaner wandb interface
             
             wandb.log(log_dict)
             
-            print(f"📊 Logged session {test_session}: WA={test_metrics['wa']:.4f}, UAR={test_metrics['uar']:.4f}, Cross-UAR={msp_metrics['uar']:.4f}")
+            print(f"📊 Logged session {test_session}: Cross-corpus WA={cross_metrics['wa']:.4f}, LOSO WA={loso_metrics['wa']:.4f}, LOSO UAR={loso_metrics['uar']:.4f}")
 
-        # Store results
-        all_results.append(test_metrics["accuracy"])
-        all_was.append(test_metrics["wa"])
-        all_uars.append(test_metrics["uar"])
-        all_f1s_weighted.append(test_metrics["f1_weighted"])
-        all_f1s_macro.append(test_metrics["f1_macro"])
-        cross_corpus_results.append(msp_metrics)
+        # Store results - LOSO is the main in-domain result, cross-corpus is generalization
+        all_results.append(loso_metrics["accuracy"])  # LOSO accuracy for main results
+        all_was.append(loso_metrics["wa"])
+        all_uars.append(loso_metrics["uar"])
+        all_f1s_weighted.append(loso_metrics["f1_weighted"])
+        all_f1s_macro.append(loso_metrics["f1_macro"])
+        cross_corpus_results.append(cross_metrics)  # Cross-corpus for generalization
         
         # Store predictions for proper aggregated confusion matrix
         if 'all_test_preds' not in locals():
@@ -926,19 +996,28 @@ def run_single_experiment(
             all_test_labels = []
             all_cross_preds = []
             all_cross_labels = []
+            all_test_difficulties = []
+            all_cross_difficulties = []
+            all_test_logits = []
+            all_cross_logits = []
         
-        all_test_preds.extend(test_preds)
-        all_test_labels.extend(test_labels)
-        all_cross_preds.extend(msp_preds)
-        all_cross_labels.extend(msp_labels)
+        all_test_preds.extend(loso_preds)
+        all_test_labels.extend(loso_labels)
+        all_cross_preds.extend(cross_preds)  # Cross-corpus = test results (IEMOCAP)
+        all_cross_labels.extend(cross_labels)
+        all_test_difficulties.extend(loso_difficulties)
+        all_cross_difficulties.extend(cross_difficulties)
+        all_test_logits.extend(loso_logits)
+        all_cross_logits.extend(cross_logits)  # Same as test for confidence analysis
 
         print(f"Session {test_session} Results:")
-        print(f"  IEMOCAP UAR: {test_metrics['uar']:.4f}")
-        print(f"  Cross-corpus UAR: {msp_metrics['uar']:.4f}")
+        print(f"  {test_dataset_name} UAR: {cross_metrics['uar']:.4f}")
+        print(f"  {train_dataset_name} LOSO UAR: {loso_metrics['uar']:.4f}")
 
     # Calculate final averaged results
+    loso_key = f"{train_dataset_name.lower()}_loso_results"
     final_results = {
-        "iemocap_results": {
+        loso_key: {
             "accuracy": {
                 "mean": float(np.mean(all_results)),
                 "std": float(np.std(all_results)),
@@ -991,10 +1070,10 @@ def run_single_experiment(
         aggregated_uar = balanced_accuracy_score(all_test_labels, all_test_preds)
         
         # Also show the per-session averages for comparison
-        per_session_uar = final_results["iemocap_results"]["uar"]["mean"]
-        per_session_uar_std = final_results["iemocap_results"]["uar"]["std"]
-        per_session_wa = final_results["iemocap_results"]["wa"]["mean"]
-        per_session_wa_std = final_results["iemocap_results"]["wa"]["std"]
+        per_session_uar = final_results[loso_key]["uar"]["mean"]
+        per_session_uar_std = final_results[loso_key]["uar"]["std"]
+        per_session_wa = final_results[loso_key]["wa"]["mean"]
+        per_session_wa_std = final_results[loso_key]["wa"]["std"]
 
         plt.figure(figsize=(10, 8))
         sns.heatmap(
@@ -1006,7 +1085,7 @@ def run_single_experiment(
             yticklabels=["Neutral", "Happy", "Sad", "Anger"],
         )
         plt.title(
-            f"IEMOCAP LOSO Aggregated Confusion Matrix\n"
+            f"{train_dataset_name} LOSO Aggregated Confusion Matrix\n"
             f"Aggregated: UAR={aggregated_uar:.4f}, WA={aggregated_accuracy:.4f}\n"
             f"Per-Session Avg: UAR={per_session_uar:.4f}±{per_session_uar_std:.4f}, WA={per_session_wa:.4f}±{per_session_wa_std:.4f}"
         )
@@ -1014,13 +1093,44 @@ def run_single_experiment(
         plt.xlabel("Predicted Label")
         wandb.log(
             {
-                "iemocap_confusion_matrix": wandb.Image(
+                f"final/{train_dataset_name.lower()}_loso_confusion_matrix": wandb.Image(
                     plt,
-                    caption=f"IEMOCAP LOSO Aggregated - UAR: {aggregated_uar:.4f}, WA: {aggregated_accuracy:.4f} | Per-Session Avg - UAR: {per_session_uar:.4f}±{per_session_uar_std:.4f}, WA: {per_session_wa:.4f}±{per_session_wa_std:.4f}",
+                    caption=f"{train_dataset_name} LOSO Aggregated - UAR: {aggregated_uar:.4f}, WA: {aggregated_accuracy:.4f} | Per-Session Avg - UAR: {per_session_uar:.4f}±{per_session_uar_std:.4f}, WA: {per_session_wa:.4f}±{per_session_wa_std:.4f}",
                 )
             }
         )
         plt.close()
+        
+        # Final aggregated difficulty analysis
+        print(f"\n🔍 Final Aggregated Difficulty Analysis")
+        final_difficulty_plot_test = difficulty_plot(
+            all_test_preds, all_test_labels, all_test_difficulties, 
+            f"Final-Aggregated-{test_dataset_name}"
+        )
+        final_difficulty_analysis_test = difficulty_analysis(
+            all_test_difficulties, all_test_labels, 
+            f"Final-Aggregated-{test_dataset_name}"
+        )
+        
+        final_difficulty_plot_cross = difficulty_plot(
+            all_cross_preds, all_cross_labels, all_cross_difficulties, 
+            f"Final-Aggregated-CrossCorpus"
+        )
+        final_difficulty_analysis_cross = difficulty_analysis(
+            all_cross_difficulties, all_cross_labels, 
+            f"Final-Aggregated-CrossCorpus"
+        )
+        
+        # Aggregated confidence/uncertainty analysis with all sessions combined
+        print(f"\n🔍 Final Aggregated Confidence Analysis")
+        final_confidence_plot_loso = confidence_vs_difficulty_session_analysis(
+            all_test_logits, all_test_difficulties, all_test_labels, all_test_preds, 
+            f"Final-Aggregated-{train_dataset_name}-LOSO-AllSessions"
+        )
+        final_confidence_plot_cross = confidence_vs_difficulty_session_analysis(
+            all_cross_logits, all_cross_difficulties, all_cross_labels, all_cross_preds, 
+            f"Final-Aggregated-CrossCorpus-AllSessions"
+        )
 
         # Cross-corpus confusion matrix
         cross_cm = confusion_matrix(
@@ -1047,7 +1157,7 @@ def run_single_experiment(
             yticklabels=["Neutral", "Happy", "Sad", "Anger"],
         )
         plt.title(
-            f"Cross-Corpus (MSP-IMPROV) Aggregated Confusion Matrix\n"
+            f"Cross-Corpus ({test_dataset_name}) Aggregated Confusion Matrix\n"
             f"Aggregated: UAR={cross_aggregated_uar:.4f}, WA={cross_aggregated_accuracy:.4f}\n"
             f"Per-Session Avg: UAR={cross_per_session_uar:.4f}±{cross_per_session_uar_std:.4f}, WA={cross_per_session_wa:.4f}±{cross_per_session_wa_std:.4f}"
         )
@@ -1055,9 +1165,9 @@ def run_single_experiment(
         plt.xlabel("Predicted Label")
         wandb.log(
             {
-                "cross_corpus_confusion_matrix": wandb.Image(
+                "final/cross_corpus_confusion_matrix": wandb.Image(
                     plt,
-                    caption=f"Cross-Corpus MSP-IMPROV Aggregated - UAR: {cross_aggregated_uar:.4f}, WA: {cross_aggregated_accuracy:.4f} | Per-Session Avg - UAR: {cross_per_session_uar:.4f}±{cross_per_session_uar_std:.4f}, WA: {cross_per_session_wa:.4f}±{cross_per_session_wa_std:.4f}",
+                    caption=f"Cross-Corpus {test_dataset_name} Aggregated - UAR: {cross_aggregated_uar:.4f}, WA: {cross_aggregated_accuracy:.4f} | Per-Session Avg - UAR: {cross_per_session_uar:.4f}±{cross_per_session_uar_std:.4f}, WA: {cross_per_session_wa:.4f}±{cross_per_session_wa_std:.4f}",
                 )
             }
         )
@@ -1066,51 +1176,205 @@ def run_single_experiment(
         # Log final metrics (both aggregated and per-session averages)
         wandb.log(
             {
-                # Per-session averages (what we report in papers)
-                "final/iemocap/uar_per_session_avg": final_results["iemocap_results"]["uar"]["mean"],
-                "final/iemocap/uar_per_session_std": final_results["iemocap_results"]["uar"]["std"],
-                "final/cross_corpus/uar_per_session_avg": final_results["cross_corpus_results"]["uar"]["mean"],
-                "final/cross_corpus/uar_per_session_std": final_results["cross_corpus_results"]["uar"]["std"],
-                "final/iemocap/wa_per_session_avg": final_results["iemocap_results"]["wa"]["mean"],
-                "final/iemocap/wa_per_session_std": final_results["iemocap_results"]["wa"]["std"],
-                "final/cross_corpus/wa_per_session_avg": final_results["cross_corpus_results"]["accuracy"]["mean"],
-                "final/cross_corpus/wa_per_session_std": final_results["cross_corpus_results"]["accuracy"]["std"],
+                # Dynamic naming based on actual datasets
+                f"final/{train_dataset_name.lower()}_loso/uar_avg": final_results[loso_key]["uar"]["mean"],
+                f"final/{train_dataset_name.lower()}_loso/uar_std": final_results[loso_key]["uar"]["std"],
+                f"final/{train_dataset_name.lower()}_loso/wa_avg": final_results[loso_key]["wa"]["mean"], 
+                f"final/{train_dataset_name.lower()}_loso/wa_std": final_results[loso_key]["wa"]["std"],
+                f"final/cross_corpus_{test_dataset_name.lower()}/uar_avg": final_results["cross_corpus_results"]["uar"]["mean"],
+                f"final/cross_corpus_{test_dataset_name.lower()}/uar_std": final_results["cross_corpus_results"]["uar"]["std"],
+                f"final/cross_corpus_{test_dataset_name.lower()}/wa_avg": final_results["cross_corpus_results"]["accuracy"]["mean"],
+                f"final/cross_corpus_{test_dataset_name.lower()}/wa_std": final_results["cross_corpus_results"]["accuracy"]["std"],
                 
-                # Aggregated metrics (for comparison)
-                "final/iemocap/uar_aggregated": aggregated_uar,
-                "final/cross_corpus/uar_aggregated": cross_aggregated_uar,
-                "final/iemocap/wa_aggregated": aggregated_accuracy,
-                "final/cross_corpus/wa_aggregated": cross_aggregated_accuracy,
+                # # Aggregated metrics (for comparison)
+                # "final/msp_training/uar_aggregated": cross_aggregated_uar,
+                # "final/cross_corpus_iemocap/uar_aggregated": aggregated_uar,
+                # "final/cross_corpus_iemocap/wa_aggregated": aggregated_accuracy,
+                # "final/msp_training/wa_aggregated": cross_aggregated_accuracy,
+                
+                # Final aggregated difficulty analysis plots
+                f"final/Difficulty_Aggregated_{test_dataset_name}": final_difficulty_plot_test,
+                f"final/Difficulty_Aggregated_CrossCorpus": final_difficulty_plot_cross,
+                **final_difficulty_analysis_test,
+                **final_difficulty_analysis_cross,
+                
             }
         )
         
         # Add summary metrics for easy access in wandb UI
         if wandb.run:
-            # Overall IEMOCAP metrics (per-session averages)
-            wandb.summary["iemocap_uar_mean"] = final_results["iemocap_results"]["uar"]["mean"]
-            wandb.summary["iemocap_uar_std"] = final_results["iemocap_results"]["uar"]["std"]
-            wandb.summary["iemocap_wa_mean"] = final_results["iemocap_results"]["wa"]["mean"]
-            wandb.summary["iemocap_wa_std"] = final_results["iemocap_results"]["wa"]["std"]
+            # LOSO metrics (main in-domain performance)
+            wandb.summary[f"{train_dataset_name.lower()}_loso_uar_mean"] = final_results[loso_key]["uar"]["mean"]
+            wandb.summary[f"{train_dataset_name.lower()}_loso_uar_std"] = final_results[loso_key]["uar"]["std"]
+            wandb.summary[f"{train_dataset_name.lower()}_loso_wa_mean"] = final_results[loso_key]["wa"]["mean"]
+            wandb.summary[f"{train_dataset_name.lower()}_loso_wa_std"] = final_results[loso_key]["wa"]["std"]
             
-            # Cross-corpus metrics (per-session averages)
-            wandb.summary["cross_corpus_uar_mean"] = final_results["cross_corpus_results"]["uar"]["mean"]
-            wandb.summary["cross_corpus_uar_std"] = final_results["cross_corpus_results"]["uar"]["std"]
-            wandb.summary["cross_corpus_wa_mean"] = final_results["cross_corpus_results"]["accuracy"]["mean"]
-            wandb.summary["cross_corpus_wa_std"] = final_results["cross_corpus_results"]["accuracy"]["std"]
-        wandb.finish()
+            # Cross-corpus metrics (generalization performance)
+            wandb.summary[f"cross_corpus_{test_dataset_name.lower()}_uar_mean"] = final_results["cross_corpus_results"]["uar"]["mean"]
+            wandb.summary[f"cross_corpus_{test_dataset_name.lower()}_uar_std"] = final_results["cross_corpus_results"]["uar"]["std"]
+            wandb.summary[f"cross_corpus_{test_dataset_name.lower()}_wa_mean"] = final_results["cross_corpus_results"]["accuracy"]["mean"]
+            wandb.summary[f"cross_corpus_{test_dataset_name.lower()}_wa_std"] = final_results["cross_corpus_results"]["accuracy"]["std"]
 
     # Print final summary
+    # Final training run with ALL sessions for best cross-corpus performance
+    print(f"\n{'='*80}")
+    print(f"🎯 FINAL TRAINING WITH ALL SESSIONS")
+    print(f"Training on ALL {train_dataset_name} sessions for optimal cross-corpus performance")
+    print(f"{'='*80}")
+    
+    # Create training set with all sessions (no held-out sessions)
+    all_session_indices = []
+    for session_id in session_splits.keys():
+        all_session_indices.extend(session_splits[session_id])
+    
+    # Create a validation split from all training data (20% for validation)
+    import random
+    random.shuffle(all_session_indices)
+    val_split_size = int(0.2 * len(all_session_indices))
+    all_train_indices = all_session_indices[val_split_size:]
+    all_val_indices = all_session_indices[:val_split_size]
+    
+    print(f"All-sessions split: {len(all_train_indices)} train, {len(all_val_indices)} val")
+    
+    train_subset_all = Subset(train_dataset_raw, all_train_indices)
+    val_subset_all = Subset(train_dataset_raw, all_val_indices)
+    
+    # Create data loaders for all-sessions training
+    train_loader_all = create_data_loader(train_subset_all, config, is_training=True)
+    val_loader_all = create_data_loader(val_subset_all, config, is_training=False)
+    
+    # Train model on all sessions (reuse existing training infrastructure)
+    print(f"🚀 Training on ALL {len(all_session_indices)} samples from {train_dataset_name}")
+    
+    # Create a fresh model for all-sessions training (AdvancedClassifier is already defined in this scope)
+    classifier_config = getattr(config, 'classifier_config', {})
+    final_model = AdvancedClassifier(
+        input_dim=768,
+        hidden_dim=classifier_config.get('hidden_dim', 256),
+        num_classes=4,
+        architecture=classifier_config.get('architecture', 'simple'),
+        pooling=classifier_config.get('pooling', 'mean'),
+        layer_norm=classifier_config.get('layer_norm', False),
+        dropout=classifier_config.get('dropout', 0.1),
+        input_dropout=classifier_config.get('input_dropout', 0.0)
+    ).to(device)
+    
+    # Setup training components (copy exact pattern from main LOSO training)
+    class_weights = torch.tensor(
+        [
+            config.class_weights["neutral"],
+            config.class_weights["happy"],
+            config.class_weights["sad"],
+            config.class_weights["anger"],
+        ]
+    ).to(device)
+
+    # Configure focal loss if specified
+    use_focal_loss = getattr(config, 'focal_loss', False)
+    focal_alpha = getattr(config, 'focal_alpha', 0.25)
+    focal_gamma = getattr(config, 'focal_gamma', 2.0)
+    label_smoothing = getattr(config, 'label_smoothing', 0.0)
+    
+    # Check if we should use difficulty scaling
+    use_difficulty_scaling = getattr(config, 'use_difficulty_scaling', True)
+    
+    # Setup training components (ALWAYS use AdaptiveSaliencyLoss like LOSO does)
+    criterion = AdaptiveSaliencyLoss(
+        class_weights=class_weights, 
+        saliency_weight=0.0, 
+        diversity_weight=0.0,
+        use_focal_loss=use_focal_loss,
+        focal_alpha=focal_alpha,
+        focal_gamma=focal_gamma,
+        label_smoothing=label_smoothing,
+        use_difficulty_scaling=use_difficulty_scaling
+    )
+    
+    optimizer = optim.AdamW(final_model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+    
+    # Training loop with validation and early stopping (same as LOSO training)
+    best_val_uar = 0
+    best_model_state = None
+    patience_counter = 0
+    
+    final_model.train()
+    for epoch in range(config.num_epochs):
+        if hasattr(train_loader_all.sampler, "set_epoch"):
+            train_loader_all.sampler.set_epoch(epoch)
+        
+        # Train
+        train_metrics = train_epoch(
+            final_model, train_loader_all, criterion, optimizer, device, epoch
+        )
+        
+        # Validate
+        val_metrics = evaluate(final_model, val_loader_all, criterion, device)
+        
+        # Early stopping logic (same as LOSO training)
+        if val_metrics["uar"] > best_val_uar:
+            best_val_uar = val_metrics["uar"]
+            patience_counter = 0
+            best_model_state = final_model.state_dict().copy()
+            print(f"All-sessions epoch {epoch}: Val UAR: {val_metrics['uar']:.4f} ⭐ NEW BEST")
+        else:
+            patience_counter += 1
+            print(f"All-sessions epoch {epoch}: Val UAR: {val_metrics['uar']:.4f} (Best: {best_val_uar:.4f}, Patience: {patience_counter}/{config.early_stopping_patience})")
+        
+        # Early stopping
+        if patience_counter >= config.early_stopping_patience:
+            print(f"Early stopping at epoch {epoch} (patience: {config.early_stopping_patience})")
+            break
+    
+    # Load best model
+    if best_model_state is not None:
+        final_model.load_state_dict(best_model_state)
+        print(f"Loaded best model with val UAR: {best_val_uar:.4f}")
+    
+    # Test on cross-corpus (same as before, but with model trained on all sessions)
+    print(f"🎯 Testing final model on {test_dataset_name} cross-corpus...")
+    final_cross_metrics, final_cross_preds, final_cross_labels, final_cross_speaker_ids, final_cross_difficulties, final_cross_logits = evaluate(
+        final_model, test_loader, criterion, device, return_predictions=True, return_logits=True
+    )
+    
+    print(f"🏆 FINAL ALL-SESSIONS CROSS-CORPUS RESULTS:")
+    print(f"   {test_dataset_name} WA: {final_cross_metrics['wa']:.4f}")
+    print(f"   {test_dataset_name} UAR: {final_cross_metrics['uar']:.4f}")
+    print(f"   (Compare to LOSO avg: WA={final_results['cross_corpus_results']['accuracy']['mean']:.4f}, UAR={final_results['cross_corpus_results']['uar']['mean']:.4f})")
+    
+    # Add to results
+    final_results["all_sessions_cross_corpus"] = {
+        "wa": final_cross_metrics['wa'],
+        "uar": final_cross_metrics['uar'],
+        "accuracy": final_cross_metrics['accuracy'],
+        "f1_weighted": final_cross_metrics['f1_weighted'],
+        "f1_macro": final_cross_metrics['f1_macro'],
+        "description": f"Cross-corpus performance when trained on ALL {train_dataset_name} sessions"
+    }
+    
+    # Log to wandb
+    if wandb.run:
+        wandb.log({
+            f"final_all_sessions/{test_dataset_name.lower()}_cross_wa": final_cross_metrics['wa'],
+            f"final_all_sessions/{test_dataset_name.lower()}_cross_uar": final_cross_metrics['uar'],
+        })
+        wandb.summary[f"all_sessions_cross_{test_dataset_name.lower()}_wa"] = final_cross_metrics['wa']
+        wandb.summary[f"all_sessions_cross_{test_dataset_name.lower()}_uar"] = final_cross_metrics['uar']
+
+    # # Finish wandb run after all logging is complete
+    # if wandb.run:
+    #     wandb.finish()
+
     print(f"\n{'='*60}")
     print(f"FINAL RESULTS")
     print(f"{'='*60}")
     print(
-        f"IEMOCAP UAR: {final_results['iemocap_results']['uar']['mean']:.4f} ± {final_results['iemocap_results']['uar']['std']:.4f}"
+        f"{train_dataset_name} LOSO UAR: {final_results[loso_key]['uar']['mean']:.4f} ± {final_results[loso_key]['uar']['std']:.4f}"
     )
     print(
         f"Cross-corpus UAR: {final_results['cross_corpus_results']['uar']['mean']:.4f} ± {final_results['cross_corpus_results']['uar']['std']:.4f}"
     )
     print(
-        f"IEMOCAP WA: {final_results['iemocap_results']['wa']['mean']:.4f} ± {final_results['iemocap_results']['wa']['std']:.4f}"
+        f"{train_dataset_name} LOSO WA: {final_results[loso_key]['wa']['mean']:.4f} ± {final_results[loso_key]['wa']['std']:.4f}"
     )
 
     return final_results
@@ -1180,10 +1444,22 @@ def main():
     config.batch_size = args.batch_size
     config.learning_rate = args.learning_rate
 
-    # Load datasets once
+    # Load datasets based on configuration
     print("Loading datasets...")
-    iemocap_dataset = EmotionDataset("IEMOCAP", split="train")
-    msp_dataset = EmotionDataset("MSP-IMPROV", split="train")
+    print(f"🔄 Training direction: {config.training_direction}")
+    
+    if config.training_direction == "MSP_to_IEMOCAP":
+        print("Training on MSP-IMPROV, Testing on IEMOCAP")
+        train_dataset_raw = EmotionDataset("MSP-IMPROV", split="train")
+        test_dataset_raw = EmotionDataset("IEMOCAP", split="train")
+        train_dataset_name = "MSP-IMPROV"
+        test_dataset_name = "IEMOCAP"
+    else:  # Default: IEMOCAP_to_MSP
+        print("Training on IEMOCAP, Testing on MSP-IMPROV")
+        train_dataset_raw = EmotionDataset("IEMOCAP", split="train")
+        test_dataset_raw = EmotionDataset("MSP-IMPROV", split="train")
+        train_dataset_name = "IEMOCAP"
+        test_dataset_name = "MSP-IMPROV"
 
     # Set VAD weights based on method
     vad_weights = None
@@ -1197,8 +1473,10 @@ def main():
     # Run experiment
     results = run_single_experiment(
         config,
-        iemocap_dataset,
-        msp_dataset,
+        train_dataset_raw,
+        test_dataset_raw,
+        train_dataset_name,
+        test_dataset_name,
         difficulty_method=args.difficulty_method,
         vad_weights=vad_weights,
         experiment_name=args.experiment_name,

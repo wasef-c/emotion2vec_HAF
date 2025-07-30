@@ -24,6 +24,7 @@ import sys
 from collections import defaultdict
 from funasr import AutoModel
 import librosa
+import matplotlib.pyplot as plt
 
 
 # Suppress outputs for clean execution
@@ -104,8 +105,16 @@ class EmotionDataset(Dataset):
             speaker_id = item.get("speaker_id", None)
             session = None
             if speaker_id is not None:
-                # Map speaker_id to session: speakers 1&2→session 1, 3&4→session 2, etc.
-                session = (speaker_id - 1) // 2 + 1
+                if dataset_name == "IEMOCAP":
+                    # IEMOCAP: speakers 1&2→session 1, 3&4→session 2, etc.
+                    session = (speaker_id - 1) // 2 + 1
+                elif dataset_name == "MSP-IMPROV":
+                    # MSP-IMPROV: speakers 947&948→session 1, 949&950→session 2, etc.
+                    # Normalize to start from 1: (947-947)//2 + 1 = 1
+                    session = (speaker_id - 947) // 2 + 1
+                else:
+                    # Default fallback for unknown datasets
+                    session = (speaker_id - 1) // 2 + 1
                 
                 # Debug tracking
                 speaker_ids_seen.add(speaker_id)
@@ -152,7 +161,7 @@ class EmotionDataset(Dataset):
                 "curriculum_order": safe_int(item.get("curriculum_order"), 0),  # Preset curriculum order
                 "valence": safe_float(item.get("valence")),
                 "arousal": safe_float(item.get("arousal")),
-                "domination": safe_float(item.get("domination")),  # Use 'domination' like original
+                "domination": safe_float(item.get("consensus_dominance")),  # Use 'domination' like original
             }
             self.data.append(processed_item)
 
@@ -260,7 +269,7 @@ def collate_fn(batch):
         datasets.append(item["dataset"])
         valences.append(item.get("valence", None))
         arousals.append(item.get("arousal", None))
-        dominations.append(item.get("domination", None))
+        dominations.append(item["domination"])
 
     return {
         "features": features,
@@ -335,8 +344,8 @@ class CurriculumSampler(Sampler):
 
         # Set smoother quantile-based progression
         if self.sorted_difficulties:
-            # Start with easiest 10% and gradually grow to 100%
-            self.start_percentile = 10  # Start with easiest 10%
+            # Start with easiest 25% and gradually grow to 100%
+            self.start_percentile = 25  # Start with easiest 25% (less aggressive)
             self.end_percentile = 100   # End with all samples
         else:
             self.start_threshold = 0.2
@@ -352,6 +361,8 @@ class CurriculumSampler(Sampler):
         elif self.pacing_function == "exponential":
             return epoch_progress**1.5  # Less aggressive than epoch_progress**2
         elif self.pacing_function == "logarithmic":
+            return np.sqrt(epoch_progress)
+        elif self.pacing_function == "sqrt":
             return np.sqrt(epoch_progress)
         else:
             return epoch_progress
@@ -871,6 +882,7 @@ class AdaptiveSaliencyLoss(nn.Module):
         focal_alpha=0.25,
         focal_gamma=2.0,
         label_smoothing=0.0,
+        use_difficulty_scaling=True,
     ):
         super().__init__()
         self.use_focal_loss = use_focal_loss
@@ -882,13 +894,14 @@ class AdaptiveSaliencyLoss(nn.Module):
             # Focal loss handles imbalance better than weighted CE
             self.emotion_loss = self.focal_loss
         else:
-            self.emotion_loss = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
+            self.emotion_loss = self.focal_loss
 
         self.saliency_weight = saliency_weight  # Reduced from 0.1
         self.diversity_weight = diversity_weight  # Reduced from 0.05
         self.class_weights = class_weights
+        self.use_difficulty_scaling = use_difficulty_scaling
 
-    def focal_loss(self, logits, targets):
+    def focal_loss(self, logits, targets, difficulties):
         """Focal Loss for addressing class imbalance with optional label smoothing."""
         # Apply manual label smoothing if specified
         if self.label_smoothing > 0:
@@ -914,7 +927,13 @@ class AdaptiveSaliencyLoss(nn.Module):
         
         # Calculate focal weight
         pt = torch.exp(-ce_loss)
-        focal_loss = self.focal_alpha * (1 - pt) ** self.focal_gamma * ce_loss
+        if difficulties is None or not self.use_difficulty_scaling:
+            # Standard focal loss without difficulty scaling
+            focal_loss = self.focal_alpha * (1 - pt) ** self.focal_gamma * ce_loss
+        else:
+            # Difficulty-scaled focal loss
+            adaptive_gamma = self.focal_gamma * (1.0 + 0.5 * difficulties)
+            focal_loss = self.focal_alpha * (1 - pt) ** adaptive_gamma * ce_loss
         return focal_loss.mean()
 
     def saliency_regularization(self, saliency_scores, epoch=None, total_epochs=None):
@@ -946,7 +965,7 @@ class AdaptiveSaliencyLoss(nn.Module):
         return 0.5 * sparsity_loss + 0.5 * diversity_loss
 
     def forward(
-        self, outputs, targets, speaker_ids=None, epoch=None, total_epochs=None
+        self, outputs, targets, speaker_ids=None, epoch=None, total_epochs=None, difficulties = None
     ):
         """
         Compute combined loss.
@@ -963,29 +982,30 @@ class AdaptiveSaliencyLoss(nn.Module):
         """
         # Main emotion classification loss
         logits = outputs["logits"]
-        emotion_loss = self.emotion_loss(logits, targets)
+        difficulties = difficulties
+        emotion_loss = self.emotion_loss(logits, targets, difficulties)
 
         total_loss = emotion_loss
 
-        # Add adaptive saliency regularization
-        if self.saliency_weight > 0 and "saliency_scores" in outputs:
-            saliency_reg = self.saliency_regularization(
-                outputs["saliency_scores"], epoch, total_epochs
-            )
-            total_loss = total_loss + self.saliency_weight * saliency_reg
+        # # Add adaptive saliency regularization
+        # if self.saliency_weight > 0 and "saliency_scores" in outputs:
+        #     saliency_reg = self.saliency_regularization(
+        #         outputs["saliency_scores"], epoch, total_epochs
+        #     )
+        #     total_loss = total_loss + self.saliency_weight * saliency_reg
 
-        # Add feature diversity regularization (encourage using both local and global)
-        if (
-            self.diversity_weight > 0
-            and "local_features" in outputs
-            and "global_features" in outputs
-        ):
-            local_norm = outputs["local_features"].norm(dim=1).mean()
-            global_norm = outputs["global_features"].norm(dim=1).mean()
+        # # Add feature diversity regularization (encourage using both local and global)
+        # if (
+        #     self.diversity_weight > 0
+        #     and "local_features" in outputs
+        #     and "global_features" in outputs
+        # ):
+        #     local_norm = outputs["local_features"].norm(dim=1).mean()
+        #     global_norm = outputs["global_features"].norm(dim=1).mean()
 
-            # Encourage balanced use of both feature types
-            balance_loss = F.mse_loss(local_norm, global_norm)
-            total_loss = total_loss + self.diversity_weight * balance_loss
+        #     # Encourage balanced use of both feature types
+        #     balance_loss = F.mse_loss(local_norm, global_norm)
+        #     total_loss = total_loss + self.diversity_weight * balance_loss
 
         return total_loss
 
@@ -1057,8 +1077,9 @@ class CorrelationDifficulty(DifficultyCalculator):
 class EuclideanDistanceDifficulty(DifficultyCalculator):
     """Difficulty based on directional Euclidean distance"""
 
-    def __init__(self, expected_vad=None):
+    def __init__(self, expected_vad=None, reversed = False):
         super().__init__("euclidean_distance", expected_vad)
+        self.reversed = reversed
 
     def calculate_difficulty(self, samples):
         difficulties = []
@@ -1083,8 +1104,11 @@ class EuclideanDistanceDifficulty(DifficultyCalculator):
             difficulty = self._calculate_directional_distance(
                 expected_vad, actual_vad, label
             )
+            
             difficulties.append(max(0, min(1, difficulty)))
-
+        if self.reversed:
+            max_diff = max(difficulties)
+            difficulties = [max_diff - d for d in difficulties]
         return difficulties
 
     def _calculate_directional_distance(self, expected, actual, label):
@@ -1096,23 +1120,10 @@ class EuclideanDistanceDifficulty(DifficultyCalculator):
         a_diff = a_act - a_exp
         d_diff = d_act - d_exp
 
-        # Apply directional logic
-        if label == 1:  # happy
-            v_penalty = max(0, -v_diff)  # only penalize lower valence
-            a_penalty = max(0, -a_diff)  # only penalize lower arousal
-            d_penalty = max(0, -d_diff)  # only penalize lower domination
-        elif label == 2:  # sad
-            v_penalty = max(0, v_diff)  # only penalize higher valence
-            a_penalty = max(0, a_diff)  # only penalize higher arousal
-            d_penalty = max(0, d_diff)  # only penalize higher domination
-        elif label == 3:  # anger
-            v_penalty = max(0, v_diff)  # only penalize higher valence
-            a_penalty = max(0, -a_diff)  # only penalize lower arousal
-            d_penalty = max(0, -d_diff)  # only penalize lower domination
-        else:  # neutral
-            v_penalty = abs(v_diff)
-            a_penalty = abs(a_diff)
-            d_penalty = abs(d_diff)
+        # Simple Euclidean distance - no directional logic, just straight distance
+        v_penalty = abs(v_diff)
+        a_penalty = abs(a_diff) 
+        d_penalty = abs(d_diff)
 
         distance = np.sqrt(v_penalty**2 + a_penalty**2 + d_penalty**2)
         max_distance = 5 * np.sqrt(3)  # Normalize to [0, 1]
@@ -1327,6 +1338,7 @@ def calculate_metrics(all_labels, all_preds):
 # ================================
 # TRAINING AND EVALUATION
 # ================================
+from tqdm import tqdm
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device, epoch):
@@ -1340,30 +1352,17 @@ def train_epoch(model, dataloader, criterion, optimizer, device, epoch):
     total_batches = len(dataloader)
     print(f"Epoch {epoch+1}: ", end="", flush=True)
 
-    for batch_idx, batch in enumerate(dataloader):
-        # Show progress bar
-        if (
-            batch_idx % max(1, total_batches // 20) == 0
-            or batch_idx == total_batches - 1
-        ):
-            progress = (batch_idx + 1) / total_batches
-            bar_length = 20
-            filled_length = int(bar_length * progress)
-            bar = "█" * filled_length + "░" * (bar_length - filled_length)
-            print(
-                f"\rEpoch {epoch+1}: [{bar}] {batch_idx+1}/{total_batches}",
-                end="",
-                flush=True,
-            )
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Epoch {epoch+1}")):
 
         features = batch["features"].to(device)
         labels = batch["label"].to(device)
+        difficulties = batch["difficulty"].to(device)
         speaker_ids = batch["speaker_id"]
 
         optimizer.zero_grad()
 
         outputs = model(features)
-        loss = criterion(outputs, labels, speaker_ids, epoch=epoch, total_epochs=50)
+        loss = criterion(outputs, labels, speaker_ids, epoch=epoch, total_epochs=50, difficulties =difficulties )
 
         loss.backward()
         # Add gradient clipping like in archived version
@@ -1385,29 +1384,37 @@ def train_epoch(model, dataloader, criterion, optimizer, device, epoch):
     return metrics
 
 
-def evaluate(model, dataloader, criterion, device, return_predictions=False):
+def evaluate(model, dataloader, criterion, device, return_predictions=False, return_logits=False):
     """Evaluate model"""
     model.eval()
     total_loss = 0
     all_preds = []
     all_labels = []
     all_speaker_ids = []
+    all_difficullties = []
+    all_logits = []
 
     with torch.no_grad():
         for batch in dataloader:
             features = batch["features"].to(device)
             labels = batch["label"].to(device)
             speaker_ids = batch["speaker_id"]
+            difficulties = batch["difficulty"].to(device)
+            all_difficullties.extend(difficulties)
 
             outputs = model(features)
-            loss = criterion(outputs, labels, speaker_ids, epoch=None, total_epochs=50)
+            loss = criterion(outputs, labels, speaker_ids, epoch=None, total_epochs=50, difficulties=difficulties)
 
             total_loss += loss.item()
 
-            preds = torch.argmax(outputs["logits"], dim=1).cpu().numpy()
+            logits = outputs["logits"]
+            preds = torch.argmax(logits, dim=1).cpu().numpy()
             all_preds.extend(preds)
             all_labels.extend(labels.cpu().numpy())
             all_speaker_ids.extend(speaker_ids.cpu().numpy() if hasattr(speaker_ids, 'cpu') else speaker_ids)
+            
+            if return_logits:
+                all_logits.extend(logits.cpu().numpy())
 
     # Show prediction distribution
     pred_counts = {}
@@ -1423,8 +1430,11 @@ def evaluate(model, dataloader, criterion, device, return_predictions=False):
     metrics = calculate_metrics(all_labels, all_preds)
     metrics["loss"] = total_loss / len(dataloader)
 
-    if return_predictions:
-        return metrics, all_preds, all_labels, all_speaker_ids
+    if return_predictions and return_logits:
+        return metrics, all_preds, all_labels, all_speaker_ids, all_difficullties, all_logits
+    elif return_predictions:
+        return metrics, all_preds, all_labels, all_speaker_ids, all_difficullties
+        
     return metrics
 
 
@@ -1445,6 +1455,112 @@ def get_session_splits(dataset):
             session_splits[session].append(i)
 
     return dict(session_splits)
+
+
+def get_speaker_splits(dataset):
+    """Get speaker-based splits for LOSO (Leave-One-Speaker-Out)"""
+    speaker_splits = defaultdict(list)
+
+    for i, item in enumerate(dataset.data):
+        speaker_id = item["speaker_id"]
+
+        # Skip if speaker_id is None
+        if speaker_id is not None:
+            speaker_splits[speaker_id].append(i)
+
+    return dict(speaker_splits)
+
+
+def create_msp_speaker_train_val_splits(dataset, test_speaker_id, val_ratio=0.2):
+    """Create train/validation splits for MSP-IMPROV with speaker-based LOSO"""
+    # Get all indices
+    all_indices = list(range(len(dataset.data)))
+    
+    # Filter out test speaker
+    test_indices = [
+        i for i in all_indices if dataset.data[i]["speaker_id"] == test_speaker_id
+    ]
+    train_val_indices = [
+        i for i in all_indices if dataset.data[i]["speaker_id"] != test_speaker_id
+    ]
+    
+    print(f"Test speaker {test_speaker_id}: {len(test_indices)} samples")
+    print(f"Train+Val speakers: {len(train_val_indices)} samples")
+    
+    # Ensure all classes are present in train_val
+    class_indices = {0: [], 1: [], 2: [], 3: []}
+    for idx in train_val_indices:
+        label = dataset.data[idx]["label"]
+        class_indices[label].append(idx)
+
+    print(
+        f"Class distribution in train+val: {[(k, len(v)) for k, v in class_indices.items()]}"
+    )
+
+    # Split train/val ensuring all classes in both sets
+    train_indices = []
+    val_indices = []
+
+    for emotion_class in range(4):
+        class_list = class_indices[emotion_class]
+        if len(class_list) == 0:
+            print(f"⚠️  Warning: No samples for class {emotion_class} in train+val")
+            continue
+            
+        # Calculate split
+        val_size = max(1, int(len(class_list) * val_ratio))  # At least 1 sample for val
+        train_size = len(class_list) - val_size
+        
+        # Random split
+        import random
+        random.shuffle(class_list)
+        
+        train_indices.extend(class_list[:train_size])
+        val_indices.extend(class_list[train_size:])
+
+    print(f"Final split - Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)}")
+    
+    return train_indices, val_indices
+
+
+def create_subset_dataset(dataset, indices):
+    """Create a subset dataset with specified indices"""
+    import copy
+    subset_dataset = copy.deepcopy(dataset)
+    subset_dataset.data = [dataset.data[i] for i in indices]
+    return subset_dataset
+
+
+def create_msp_train_val_splits(dataset, val_ratio=0.2):
+    """Create train/validation splits for MSP-IMPROV (no session-based splits)"""
+    # Get all indices
+    all_indices = list(range(len(dataset.data)))
+    
+    # Ensure all classes are present in train_val
+    class_indices = {0: [], 1: [], 2: [], 3: []}
+    for idx in all_indices:
+        label = dataset.data[idx]["label"]
+        class_indices[label].append(idx)
+
+    print(
+        f"Class distribution in MSP: {[(k, len(v)) for k, v in class_indices.items()]}"
+    )
+
+    # Split train/val ensuring all classes in both sets
+    train_indices = []
+    val_indices = []
+
+    for emotion_class in range(4):
+        class_list = class_indices[emotion_class]
+        if len(class_list) > 0:
+            # Use deterministic shuffle with fixed seed
+            rng = np.random.RandomState(42)
+            rng.shuffle(class_list)
+            n_val_class = max(1, int(val_ratio * len(class_list)))
+            val_indices.extend(class_list[:n_val_class])
+            train_indices.extend(class_list[n_val_class:])
+
+    return train_indices, val_indices
 
 
 def create_train_val_test_splits(dataset, test_session, val_ratio=0.2):
@@ -1496,31 +1612,41 @@ def create_train_val_test_splits(dataset, test_session, val_ratio=0.2):
 
     return train_indices, val_indices, test_indices
 
-
+# --- Modified function ---
 def apply_custom_difficulty(
-    dataset, train_indices, method_name, expected_vad, vad_weights=None
+    dataset, method_name, expected_vad, vad_weights=None
 ):
-    """Apply custom difficulty calculation to training data only"""
+    """
+    Apply custom difficulty calculation to all data in the dataset.
+    This function modifies the 'difficulty' field of each item in dataset.data.
 
-    print(f"🔢 Calculating {method_name} difficulties for training data...")
+    Args:
+        dataset (object): An object with a 'data' attribute (e.g., a list of dictionaries).
+        method_name (str): The name of the difficulty calculation method.
+        expected_vad (dict): A dictionary with expected VAD values (e.g., {'valence': 0.5, 'arousal': 0.5, 'domination': 0.5}).
+        vad_weights (list, optional): A list of weights for VAD dimensions, used by some methods. Defaults to None.
+    """
 
-    # Handle preset difficulty method (uses curriculum_order)
+    print(f"🔢 Calculating {method_name} difficulties for all data...")
+
+    # Define the indices for all data in the dataset
+    all_indices = range(len(dataset.data))
+
+    # --- Preset method ---
     if method_name == "preset":
         print("📋 Using preset curriculum_order as difficulty values...")
-
-        # Extract curriculum_order values for training samples
         preset_difficulties = []
-        for train_idx in train_indices:
-            item = dataset.data[train_idx]
+        for idx in all_indices:
+            item = dataset.data[idx]
             curriculum_order = item.get("curriculum_order", None)
             if curriculum_order is None:
                 print(
-                    f"⚠️  WARNING: curriculum_order missing for sample {train_idx}, using 0.5"
+                    f"⚠️  WARNING: curriculum_order missing for sample {idx}, using 0.5"
                 )
                 curriculum_order = 0.5
             preset_difficulties.append(curriculum_order)
 
-        # Normalize to [0, 1] range if needed
+        # Normalize to [0, 1] range
         min_diff = min(preset_difficulties)
         max_diff = max(preset_difficulties)
         range_diff = max_diff - min_diff
@@ -1533,39 +1659,41 @@ def apply_custom_difficulty(
             normalized_difficulties = [0.5] * len(preset_difficulties)
 
         # Update dataset with preset difficulties
-        for i, train_idx in enumerate(train_indices):
-            dataset.data[train_idx]["difficulty"] = normalized_difficulties[i]
+        for i, idx in enumerate(all_indices):
+            dataset.data[idx]["difficulty"] = normalized_difficulties[i]
 
         print(
-            f"✅ Updated {len(train_indices)} training samples with preset curriculum_order"
+            f"✅ Updated {len(all_indices)} samples with preset curriculum_order"
         )
-        print(f"   Original range: {min_diff:.3f} - {max_diff:.3f}")
+        print(f"    Original range: {min_diff:.3f} - {max_diff:.3f}")
         print(
-            f"   Normalized range: {min(normalized_difficulties):.3f} - {max(normalized_difficulties):.3f}"
+            f"    Normalized range: {min(normalized_difficulties):.3f} - {max(normalized_difficulties):.3f}"
         )
-
-        # Log per-class statistics
+        
+        # Log per-class statistics (assuming emotion labels exist)
         emotion_names = ["neutral", "happy", "sad", "anger"]
         for emotion_class in range(4):
             class_difficulties = [
                 diff
                 for i, diff in enumerate(preset_difficulties)
-                if dataset.data[train_indices[i]]["label"] == emotion_class
+                if dataset.data[all_indices[i]].get("label") == emotion_class
             ]
             if class_difficulties:
                 print(
-                    f"   {emotion_names[emotion_class]}: mean={np.mean(class_difficulties):.3f}, n={len(class_difficulties)}"
+                    f"    {emotion_names[emotion_class]}: mean={np.mean(class_difficulties):.3f}, n={len(class_difficulties)}"
                 )
 
         return  # Early return for preset method
 
-    # Initialize calculator for other methods
+    # --- Initialize calculator for other methods ---
     if method_name == "pearson_correlation":
         calculator = CorrelationDifficulty("pearson", expected_vad)
     elif method_name == "spearman_correlation":
         calculator = CorrelationDifficulty("spearman", expected_vad)
     elif method_name == "euclidean_distance":
         calculator = EuclideanDistanceDifficulty(expected_vad)
+    elif method_name == "euclidean_distance_reversed":
+        calculator = EuclideanDistanceDifficulty(expected_vad, reversed=True)
     elif method_name.startswith("weighted_vad"):
         weights = vad_weights or [0.4, 0.4, 0.2]
         calculator = WeightedVADDifficulty(weights, expected_vad)
@@ -1582,67 +1710,647 @@ def apply_custom_difficulty(
         print(f"⚠️  Unknown method: {method_name}")
         return
 
-    # Extract training samples
-    train_samples = []
-    for train_idx in train_indices:
-        item = dataset.data[train_idx]
-        train_samples.append(
+    # Extract all samples
+    all_samples = []
+    for idx in all_indices:
+        item = dataset.data[idx]
+        all_samples.append(
             {
-                "label": item["label"],
+                "label": item.get("label", None),
                 "valence": item.get("valence", None),
                 "arousal": item.get("arousal", None),
                 "domination": item.get("domination", None),
-                "original_idx": train_idx,
+                "original_idx": idx,
             }
         )
 
-    # Calculate difficulties
-    new_difficulties = calculator.calculate_difficulty(train_samples)
+    # Calculate difficulties for all samples
+    new_difficulties = calculator.calculate_difficulty(all_samples)
 
-    # Normalize to [0, 1]
-    min_diff = min(new_difficulties)
-    max_diff = max(new_difficulties)
-    range_diff = max_diff - min_diff
+    # Apply rescaling with better distribution across [0,1] range
+    if new_difficulties:
+        difficulties_array = np.array(new_difficulties)
+        
+        # Choose normalization method based on distribution characteristics
+        diff_min = difficulties_array.min()
+        diff_max = difficulties_array.max()
+        diff_std = difficulties_array.std()
+        diff_range = diff_max - diff_min
+        
+        if diff_max > diff_min:
+            # Check if we need better distribution
+            # If std is very small relative to range, use percentile-based stretching
+            coefficient_of_variation = diff_std / np.mean(difficulties_array) if np.mean(difficulties_array) != 0 else 0
+            
+            if coefficient_of_variation < 0.2:  # Low variation - use percentile stretching
+                print(f"    Using percentile-based distribution (low CV: {coefficient_of_variation:.3f})")
+                from scipy.stats import rankdata
+                percentile_ranks = rankdata(difficulties_array, method='average') / len(difficulties_array)
+                
+                # Use a gentler sigmoid that preserves more differences than the original
+                stretched = 4 * (percentile_ranks - 0.5)  # Map to [-2, 2] for gentler curve
+                sigmoid_stretched = 1 / (1 + np.exp(-stretched))  # Gentler sigmoid
+                normalized_difficulties = sigmoid_stretched.tolist()
+                
+            else:  # Good natural variation - use min-max with optional quantile clipping
+                print(f"    Using robust min-max normalization (good CV: {coefficient_of_variation:.3f})")
+                
+                # Optional: Use quantile-based clipping to remove extreme outliers
+                q1, q99 = np.percentile(difficulties_array, [1, 99])
+                clipped_difficulties = np.clip(difficulties_array, q1, q99)
+                
+                # Normalize clipped values
+                clipped_min = clipped_difficulties.min()
+                clipped_max = clipped_difficulties.max()
+                
+                if clipped_max > clipped_min:
+                    normalized_difficulties = ((clipped_difficulties - clipped_min) / (clipped_max - clipped_min)).tolist()
+                else:
+                    normalized_difficulties = [0.5] * len(difficulties_array)
+        else:
+            # All values are the same
+            normalized_difficulties = [0.5] * len(difficulties_array)
+        
+        print(f"    Method: {method_name}")
+        print(f"    Original range: {diff_min:.6f} - {diff_max:.6f}")
+        print(f"    Original std: {difficulties_array.std():.6f}")
+        print(f"    Normalized range: {min(normalized_difficulties):.3f} - {max(normalized_difficulties):.3f}")
+        print(f"    Normalized std: {np.array(normalized_difficulties).std():.6f}")
+        print(f"    Unique values: {len(np.unique(difficulties_array))}")
+        
+        # Analyze distribution quality
+        norm_array = np.array(normalized_difficulties)
+        print(f"    Distribution quartiles: {np.percentile(norm_array, [25, 50, 75])}")
+        
+        # Debug per-class difficulty if we have labels
+        if hasattr(all_samples[0], 'get') and 'label' in all_samples[0]:
+            labels_array = np.array([s['label'] for s in all_samples])
+            class_names = {0: 'Neutral', 1: 'Happy', 2: 'Sad', 3: 'Anger'}
+            print(f"    Per-class difficulty stats:")
+            for class_id in [0, 1, 2, 3]:
+                class_mask = labels_array == class_id
+                if np.any(class_mask):
+                    class_difficulties = norm_array[class_mask]
+                    print(f"      {class_names[class_id]}: mean={class_difficulties.mean():.3f}, std={class_difficulties.std():.3f}, n={len(class_difficulties)}")
+        elif len(all_samples) > 0 and hasattr(all_samples[0], 'label'):
+            # Handle case where samples are objects with .label attribute
+            labels_array = np.array([s.label for s in all_samples])
+            class_names = {0: 'Neutral', 1: 'Happy', 2: 'Sad', 3: 'Anger'}
+            print(f"    Per-class difficulty stats:")
+            for class_id in [0, 1, 2, 3]:
+                class_mask = labels_array == class_id
+                if np.any(class_mask):
+                    class_difficulties = norm_array[class_mask]
+                    print(f"      {class_names[class_id]}: mean={class_difficulties.mean():.3f}, std={class_difficulties.std():.3f}, n={len(class_difficulties)}")
+        
+        # Check how well distributed the values are across [0,1]
+        bins = np.linspace(0, 1, 11)  # 10 bins
+        hist, _ = np.histogram(norm_array, bins=bins)
+        bin_percentages = hist / len(norm_array) * 100
+        print(f"    Distribution across 10 bins: {[f'{p:.1f}%' for p in bin_percentages]}")
+        
+        # Sample some values to see the distribution 
+        sample_indices = np.linspace(0, len(difficulties_array)-1, 10, dtype=int)
+        print(f"    Sample original: {[f'{difficulties_array[i]:.4f}' for i in sample_indices]}")
+        print(f"    Sample normalized: {[f'{normalized_difficulties[i]:.4f}' for i in sample_indices]}")
+        
+        # Update the dataset with the calculated difficulties
+        for i, (sample, difficulty) in enumerate(
+            zip(all_samples, normalized_difficulties)
+        ):
+            original_idx = sample["original_idx"]
+            dataset.data[original_idx]["difficulty"] = difficulty
 
-    if range_diff > 0:
-        normalized_difficulties = [
-            (d - min_diff) / range_diff for d in new_difficulties
-        ]
+        print(f"✅ Updated {len(all_samples)} samples with {method_name} difficulty")
+        print(f"    Original range: {min(new_difficulties):.3f} - {max(new_difficulties):.3f}")
+        print(f"    Normalized range: {min(normalized_difficulties):.3f} - {max(normalized_difficulties):.3f}")
     else:
-        normalized_difficulties = [0.5] * len(new_difficulties)
+        print("⚠️  No difficulties calculated. Dataset may be empty.")
+        return
 
-    # Update dataset
-    for i, (train_sample, difficulty) in enumerate(
-        zip(train_samples, normalized_difficulties)
-    ):
-        original_idx = train_sample["original_idx"]
-        dataset.data[original_idx]["difficulty"] = difficulty
+def difficulty_plot(test_preds,test_labels,all_difficulties,dataset_name="IEMO"):
+    # Configuration - increased to 10 bins for better granularity
+    num_bins = 10
 
-    print(
-        f"✅ Updated {len(train_indices)} training samples with {method_name} difficulties"
+    # Helper function to convert to numpy safely
+    def to_numpy(x):
+        if x is None:
+            return None
+        # Handle torch tensors
+        if hasattr(x, 'detach'):
+            return x.detach().cpu().numpy()
+        # Handle lists/arrays that might contain tensors
+        if isinstance(x, (list, tuple)):
+            return np.array([to_numpy(item) if hasattr(item, 'detach') else item for item in x])
+        # Handle regular numpy arrays or other types
+        return np.array(x)
+
+    # Convert all inputs to numpy arrays
+    test_preds = to_numpy(test_preds)
+    test_labels = to_numpy(test_labels)
+    all_difficulties = to_numpy(all_difficulties)
+    # Calculate per-sample correctness
+    correctness = (test_preds == test_labels)
+    difficulty_bins = np.linspace(
+        start=all_difficulties.min(),
+        stop=all_difficulties.max(),
+        num=num_bins + 1
     )
-    print(
-        f"   Difficulty range: {min(normalized_difficulties):.3f} - {max(normalized_difficulties):.3f}"
-    )
+    # Use np.digitize to assign each difficulty score to a bin index (1-based)
+    bin_indices = np.digitize(all_difficulties, difficulty_bins)
+    # Store the results for the plot
+    bin_accuracies = []
+    bin_centers = []
+    bin_counts = []
+    bin_labels = []
+    
+    # Iterate through each bin
+    for i in range(1, num_bins + 1):
+        # Find all samples that fall into the current bin
+        indices_in_bin = np.where(bin_indices == i)[0]
+        
+        if len(indices_in_bin) > 0:
+            # Calculate accuracy for this bin
+            accuracy = np.mean(correctness[indices_in_bin])
+            
+            # Get the center of the bin for plotting
+            bin_center = (difficulty_bins[i-1] + difficulty_bins[i]) / 2
+            
+            # Create a readable label with difficulty range and sample count
+            bin_label = f"Bin {i}\n({difficulty_bins[i-1]:.2f}-{difficulty_bins[i]:.2f})\nn={len(indices_in_bin)}"
+            
+            bin_accuracies.append(accuracy)
+            bin_centers.append(bin_center)
+            bin_counts.append(len(indices_in_bin))
+            bin_labels.append(bin_label)
+            
+            print(f"  Bin {i}/{num_bins}: Samples={len(indices_in_bin)}, Accuracy={accuracy:.4f}")
+        else:
+            print(f"  Bin {i}/{num_bins}: No samples found.")
 
-    # Log per-class statistics
+    # Create a WandB Table to log the data with sample counts
+    data = [[label, acc, count] for label, acc, count in zip(bin_labels, bin_accuracies, bin_counts)]
+    table = wandb.Table(data=data, columns=["difficulty_range", "accuracy", "sample_count"])
+
+    # Create the plot object from the table - using bar chart for better readability
+    accuracy_plot = wandb.plot.bar(
+        table,
+        "difficulty_range",
+        "accuracy",
+        title=f"Model Accuracy vs. Data Difficulty ({dataset_name})")
+        
+    return accuracy_plot
+
+
+def confidence_vs_difficulty_session_analysis(logits, difficulties, labels, predictions, dataset_name="IEMO"):
+    """Create clean difficulty vs confidence analysis for per-session data (smaller, more interpretable)"""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import scipy.stats
+    
+    # Convert to numpy
+    logits = np.array([l.cpu().numpy() if hasattr(l, 'cpu') else l for l in logits])
+    difficulties = np.array([d.cpu().numpy() if hasattr(d, 'cpu') else d for d in difficulties])
+    labels = np.array([l.cpu().numpy() if hasattr(l, 'cpu') else l for l in labels])
+    predictions = np.array([p.cpu().numpy() if hasattr(p, 'cpu') else p for p in predictions])
+    
+    # Calculate confidence metrics from logits  
+    from scipy.special import softmax
+    probs = softmax(logits, axis=1)  # Convert logits to probabilities
+    max_probs = np.max(probs, axis=1)  # Max probability (confidence)
+    entropy = -np.sum(probs * np.log(probs + 1e-8), axis=1)  # Entropy (lower = more confident)
+    
+    # Normalized entropy (0-1, where 0 = most confident, 1 = least confident)
+    max_entropy = np.log(logits.shape[1])  # log(num_classes)
+    normalized_entropy = entropy / max_entropy
+    
+    # DEBUGGING: Print stats to verify differences across experiments
+    print(f"=== CONFIDENCE/DIFFICULTY DEBUG for {dataset_name} ===")
+    print(f"Difficulty stats: min={difficulties.min():.6f}, max={difficulties.max():.6f}, std={difficulties.std():.6f}")
+    print(f"Confidence stats: min={max_probs.min():.6f}, max={max_probs.max():.6f}, std={max_probs.std():.6f}")
+    print(f"Entropy stats: min={normalized_entropy.min():.6f}, max={normalized_entropy.max():.6f}, std={normalized_entropy.std():.6f}")
+    print(f"Unique difficulty values: {len(np.unique(difficulties))}")
+    print(f"Sample difficulties: {np.percentile(difficulties, [0, 25, 50, 75, 100])}")
+    print(f"Sample confidences: {np.percentile(max_probs, [0, 25, 50, 75, 100])}")
+    
+    # VALIDATION: Check if difficulty semantics are correct
+    # Easy samples (low difficulty) should have higher accuracy than hard samples (high difficulty)
+    correct_predictions = (predictions == labels)
+    easy_mask = difficulties < np.percentile(difficulties, 25)  # Bottom 25% = easiest
+    hard_mask = difficulties > np.percentile(difficulties, 75)  # Top 25% = hardest
+    
+    easy_accuracy = np.mean(correct_predictions[easy_mask])
+    hard_accuracy = np.mean(correct_predictions[hard_mask])
+    
+    print(f"DIFFICULTY VALIDATION:")
+    print(f"  Easy samples (bottom 25%) accuracy: {easy_accuracy:.4f}")
+    print(f"  Hard samples (top 25%) accuracy: {hard_accuracy:.4f}")
+    print(f"  Difference (easy - hard): {easy_accuracy - hard_accuracy:.4f}")
+    
+    if easy_accuracy > hard_accuracy:
+        print(f"  ✅ CORRECT: Easy samples have higher accuracy than hard samples")
+    else:
+        print(f"  ❌ INVERTED: Hard samples have higher accuracy - difficulty may be inverted!")
+        print(f"     Consider using a different difficulty method or adding '_reversed' suffix")
+    
+    # Create figure with scatter plot + binned analyses
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    fig.suptitle(f'Confidence vs Difficulty Analysis - {dataset_name}', fontsize=16, fontweight='bold')
+    
+    # Calculate statistical relationships instead of binning
+    from scipy import stats
+    from sklearn.metrics import r2_score
+    from sklearn.linear_model import LinearRegression
+    
+    # Compute correlation statistics
+    pearson_corr, pearson_p = stats.pearsonr(difficulties, max_probs)
+    spearman_corr, spearman_p = stats.spearmanr(difficulties, max_probs)
+    
+    # Compute R² using linear regression
+    reg = LinearRegression()
+    X = difficulties.reshape(-1, 1)
+    reg.fit(X, max_probs)
+    confidence_r2 = r2_score(max_probs, reg.predict(X))
+    
+    # Same for accuracy relationship
+    correct_predictions = (predictions == labels).astype(float)
+    acc_pearson_corr, acc_pearson_p = stats.pearsonr(difficulties, correct_predictions) 
+    acc_reg = LinearRegression()
+    acc_reg.fit(X, correct_predictions)
+    accuracy_r2 = r2_score(correct_predictions, acc_reg.predict(X))
+    
+    # Same for entropy relationship
+    entropy_pearson_corr, entropy_pearson_p = stats.pearsonr(difficulties, normalized_entropy)
+    entropy_reg = LinearRegression()
+    entropy_reg.fit(X, normalized_entropy)
+    entropy_r2 = r2_score(normalized_entropy, entropy_reg.predict(X))
+    
+    print(f"STATISTICAL RELATIONSHIPS:")
+    print(f"  Difficulty vs Confidence: r={pearson_corr:.4f} (p={pearson_p:.4f}), R²={confidence_r2:.4f}")
+    print(f"  Difficulty vs Accuracy: r={acc_pearson_corr:.4f} (p={acc_pearson_p:.4f}), R²={accuracy_r2:.4f}")
+    print(f"  Difficulty vs Entropy: r={entropy_pearson_corr:.4f} (p={entropy_pearson_p:.4f}), R²={entropy_r2:.4f}")
+    
+    # Create finer bins for trend overlay (not main analysis)
+    n_trend_bins = 30
+    bin_edges = np.linspace(difficulties.min(), difficulties.max(), n_trend_bins + 1)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    bin_confidence_means = []
+    bin_accuracy_means = []
+    bin_entropy_means = []
+    
+    for i in range(n_trend_bins):
+        mask = (difficulties >= bin_edges[i]) & (difficulties < bin_edges[i+1])
+        if np.sum(mask) > 0:
+            bin_confidence_means.append(np.mean(max_probs[mask]))
+            bin_accuracy_means.append(np.mean(correct_predictions[mask]))
+            bin_entropy_means.append(np.mean(normalized_entropy[mask]))
+        else:
+            bin_confidence_means.append(np.nan)
+            bin_accuracy_means.append(np.nan)
+            bin_entropy_means.append(np.nan)
+    
+    # 1. Hexagonal binning plot for density visualization
+    axes[0, 0].hexbin(difficulties, max_probs, gridsize=30, cmap='Blues', alpha=0.8)
+    
+    # Add regression line
+    x_line = np.linspace(difficulties.min(), difficulties.max(), 100)
+    y_line = reg.predict(x_line.reshape(-1, 1))
+    axes[0, 0].plot(x_line, y_line, 'r-', linewidth=2, alpha=0.8, label=f'Regression (R²={confidence_r2:.3f})')
+    
+    axes[0, 0].set_xlabel('Difficulty')
+    axes[0, 0].set_ylabel('Confidence (Max Probability)')
+    axes[0, 0].set_title(f'Confidence vs Difficulty\nr={pearson_corr:.3f}, p={pearson_p:.4f}')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].legend()
+    axes[0, 0].set_ylim(0, 1)
+    
+    # 2. Alternative Confidence vs Difficulty view (different style from plot 1)
+    # Sample if too many points
+    if len(difficulties) > 3000:
+        sample_idx = np.random.choice(len(difficulties), 3000, replace=False)
+        plot_diff = difficulties[sample_idx]
+        plot_conf = max_probs[sample_idx]
+        plot_correct = correct_predictions[sample_idx]
+    else:
+        plot_diff = difficulties
+        plot_conf = max_probs
+        plot_correct = correct_predictions
+    
+    # Color by actual correctness for confidence
+    axes[0, 1].scatter(plot_diff[plot_correct == 1], plot_conf[plot_correct == 1], 
+                      alpha=0.4, c='green', s=1, label='Correct')
+    axes[0, 1].scatter(plot_diff[plot_correct == 0], plot_conf[plot_correct == 0], 
+                      alpha=0.4, c='red', s=1, label='Incorrect')
+    
+    # Add regression line for confidence (same as plot 1 but different style)
+    y_conf_line = reg.predict(x_line.reshape(-1, 1))
+    axes[0, 1].plot(x_line, y_conf_line, 'b-', linewidth=2, alpha=0.8, label=f'Regression (R²={confidence_r2:.3f})')
+    
+    # Add trend line from binning for smoother overlay
+    valid_bins = ~np.isnan(bin_confidence_means)
+    if np.any(valid_bins):
+        axes[0, 1].plot(np.array(bin_centers)[valid_bins], np.array(bin_confidence_means)[valid_bins], 
+                       'o-', color='darkblue', linewidth=2, markersize=6, alpha=0.9, label='Binned Trend')
+    
+    axes[0, 1].set_xlabel('Difficulty')
+    axes[0, 1].set_ylabel('Confidence (Max Probability)')
+    axes[0, 1].set_title(f'Confidence vs Difficulty (Scatter)\nr={pearson_corr:.3f}, p={pearson_p:.4f}')
+    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].legend()
+    axes[0, 1].set_ylim(0, 1)
+    
+    # 3. Confidence vs Accuracy scatter (direct relationship)
+    conf_acc_corr, conf_acc_p = stats.pearsonr(max_probs, correct_predictions)
+    
+    # Use scatter with jitter for binary accuracy  
+    jitter_strength = 0.05  # Define jitter strength here too
+    jittered_accuracy_conf = correct_predictions + np.random.normal(0, jitter_strength, len(correct_predictions))
+    
+    # Sample if too many points
+    if len(max_probs) > 3000:
+        sample_idx_conf = np.random.choice(len(max_probs), 3000, replace=False)
+        plot_conf = max_probs[sample_idx_conf]
+        plot_acc_conf = jittered_accuracy_conf[sample_idx_conf]
+        plot_correct_conf = correct_predictions[sample_idx_conf]
+    else:
+        plot_conf = max_probs
+        plot_acc_conf = jittered_accuracy_conf
+        plot_correct_conf = correct_predictions
+    
+    # Color by actual correctness
+    axes[1, 0].scatter(plot_conf[plot_correct_conf == 1], plot_acc_conf[plot_correct_conf == 1], 
+                      alpha=0.4, c='green', s=1, label='Correct')
+    axes[1, 0].scatter(plot_conf[plot_correct_conf == 0], plot_acc_conf[plot_correct_conf == 0], 
+                      alpha=0.4, c='red', s=1, label='Incorrect')
+    
+    # Add regression line for confidence vs accuracy
+    conf_reg = LinearRegression()
+    conf_reg.fit(max_probs.reshape(-1, 1), correct_predictions)
+    x_conf_line = np.linspace(max_probs.min(), max_probs.max(), 100)
+    y_conf_acc_line = conf_reg.predict(x_conf_line.reshape(-1, 1))
+    conf_acc_r2 = r2_score(correct_predictions, conf_reg.predict(max_probs.reshape(-1, 1)))
+    
+    axes[1, 0].plot(x_conf_line, y_conf_acc_line, 'purple', linewidth=2, alpha=0.8, 
+                   label=f'Regression (R²={conf_acc_r2:.3f})')
+    
+    axes[1, 0].set_xlabel('Confidence (Max Probability)')
+    axes[1, 0].set_ylabel('Accuracy (with jitter)')
+    axes[1, 0].set_title(f'Confidence vs Accuracy\nr={conf_acc_corr:.3f}, p={conf_acc_p:.4f}')
+    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].legend()
+    axes[1, 0].set_ylim(-0.1, 1.1)
+    
+    # 4. Uncertainty (entropy) by difficulty
+    axes[1, 1].hexbin(difficulties, normalized_entropy, gridsize=30, cmap='Reds', alpha=0.8)
+    
+    # Add regression line for entropy
+    y_entropy_line = entropy_reg.predict(x_line.reshape(-1, 1))
+    axes[1, 1].plot(x_line, y_entropy_line, 'r-', linewidth=2, alpha=0.8, 
+                   label=f'Regression (R²={entropy_r2:.3f})')
+    
+    # Add trend line from binning
+    valid_entropy_bins = ~np.isnan(bin_entropy_means)
+    if np.any(valid_entropy_bins):
+        axes[1, 1].plot(np.array(bin_centers)[valid_entropy_bins], np.array(bin_entropy_means)[valid_entropy_bins], 
+                       'o-', color='darkred', linewidth=1, markersize=4, alpha=0.7, label='Trend')
+    
+    axes[1, 1].set_xlabel('Difficulty')
+    axes[1, 1].set_ylabel('Normalized Entropy (Uncertainty)')
+    axes[1, 1].set_title(f'Uncertainty vs Difficulty\nr={entropy_pearson_corr:.3f}, p={entropy_pearson_p:.4f}')
+    axes[1, 1].grid(True, alpha=0.3)
+    axes[1, 1].legend()
+    axes[1, 1].set_ylim(0, 1)
+    
+    plt.tight_layout()
+    
+    # Convert to wandb Image
+    import wandb
+    wandb_image = wandb.Image(plt)
+    plt.close()
+    
+    return wandb_image
+
+
+def confidence_vs_difficulty_analysis(logits, difficulties, labels, predictions, dataset_name="IEMO"):
+    """Create difficulty vs confidence analysis plot using logits entropy and max probability"""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import scipy.stats
+    
+    # Convert to numpy
+    logits = np.array([l.cpu().numpy() if hasattr(l, 'cpu') else l for l in logits])
+    difficulties = np.array([d.cpu().numpy() if hasattr(d, 'cpu') else d for d in difficulties])
+    labels = np.array([l.cpu().numpy() if hasattr(l, 'cpu') else l for l in labels])
+    predictions = np.array([p.cpu().numpy() if hasattr(p, 'cpu') else p for p in predictions])
+    
+    # Calculate confidence metrics from logits  
+    from scipy.special import softmax
+    probs = softmax(logits, axis=1)  # Convert logits to probabilities
+    max_probs = np.max(probs, axis=1)  # Max probability (confidence)
+    entropy = -np.sum(probs * np.log(probs + 1e-8), axis=1)  # Entropy (lower = more confident)
+    
+    # Normalized entropy (0-1, where 0 = most confident, 1 = least confident)
+    max_entropy = np.log(logits.shape[1])  # log(num_classes)
+    normalized_entropy = entropy / max_entropy
+    
+    # Create figure
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle(f'Difficulty vs Confidence Analysis - {dataset_name}', fontsize=16, fontweight='bold')
+    
+    # 1. Scatter plot: Difficulty vs Max Probability
+    axes[0, 0].scatter(difficulties, max_probs, alpha=0.6, s=20)
+    axes[0, 0].set_xlabel('Difficulty')
+    axes[0, 0].set_ylabel('Max Probability (Confidence)')
+    axes[0, 0].set_title('Difficulty vs Max Probability')
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # Add correlation coefficient
+    corr_maxprob, p_maxprob = scipy.stats.pearsonr(difficulties, max_probs)
+    axes[0, 0].text(0.05, 0.95, f'Corr: {corr_maxprob:.3f} (p={p_maxprob:.3f})', 
+                    transform=axes[0, 0].transAxes, bbox=dict(boxstyle="round", facecolor='wheat'))
+    
+    # 2. Scatter plot: Difficulty vs Entropy
+    axes[0, 1].scatter(difficulties, normalized_entropy, alpha=0.6, s=20, color='red')
+    axes[0, 1].set_xlabel('Difficulty')
+    axes[0, 1].set_ylabel('Normalized Entropy (Uncertainty)')
+    axes[0, 1].set_title('Difficulty vs Entropy')
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Add correlation coefficient
+    corr_entropy, p_entropy = scipy.stats.pearsonr(difficulties, normalized_entropy)
+    axes[0, 1].text(0.05, 0.95, f'Corr: {corr_entropy:.3f} (p={p_entropy:.3f})', 
+                    transform=axes[0, 1].transAxes, bbox=dict(boxstyle="round", facecolor='lightcoral'))
+    
+    # 3. Binned analysis: Average confidence by difficulty
+    # Create 5 difficulty bins consistent with other analyses
+    bin_edges = np.linspace(difficulties.min(), difficulties.max(), 6)
+    bin_indices = np.digitize(difficulties, bin_edges)
+    
+    bin_centers = []
+    bin_max_probs = []
+    bin_entropies = []
+    bin_accuracies = []
+    
+    for i in range(1, len(bin_edges)):
+        mask = bin_indices == i
+        if np.sum(mask) > 0:
+            bin_centers.append((bin_edges[i-1] + bin_edges[i]) / 2)
+            bin_max_probs.append(np.mean(max_probs[mask]))
+            bin_entropies.append(np.mean(normalized_entropy[mask]))
+            bin_accuracies.append(np.mean(predictions[mask] == labels[mask]))
+    
+    axes[0, 2].plot(bin_centers, bin_max_probs, 'o-', label='Max Probability', color='blue')
+    axes[0, 2].set_xlabel('Difficulty (Bin Centers)')
+    axes[0, 2].set_ylabel('Average Max Probability')
+    axes[0, 2].set_title('Confidence by Difficulty Bins')
+    axes[0, 2].grid(True, alpha=0.3)
+    axes[0, 2].legend()
+    
+    # 4. Accuracy vs Confidence
+    axes[1, 0].plot(bin_centers, bin_accuracies, 's-', label='Accuracy', color='green')
+    axes[1, 0].plot(bin_centers, bin_max_probs, 'o-', label='Confidence', color='blue')
+    axes[1, 0].set_xlabel('Difficulty (Bin Centers)')
+    axes[1, 0].set_ylabel('Score')
+    axes[1, 0].set_title('Accuracy vs Confidence by Difficulty')
+    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].legend()
+    
+    # 5. Entropy by Difficulty Bins
+    axes[1, 1].plot(bin_centers, bin_entropies, '^-', label='Normalized Entropy', color='red')
+    axes[1, 1].set_xlabel('Difficulty (Bin Centers)')
+    axes[1, 1].set_ylabel('Average Normalized Entropy')
+    axes[1, 1].set_title('Uncertainty by Difficulty Bins')
+    axes[1, 1].grid(True, alpha=0.3)
+    axes[1, 1].legend()
+    
+    # 6. Confidence statistics table
+    stats_text = f"{'Metric':<20} {'Mean':<8} {'Std':<8} {'Min':<8} {'Max':<8}\n"
+    stats_text += "-" * 60 + "\n"
+    stats_text += f"{'Max Probability':<20} {np.mean(max_probs):<8.3f} {np.std(max_probs):<8.3f} {np.min(max_probs):<8.3f} {np.max(max_probs):<8.3f}\n"
+    stats_text += f"{'Normalized Entropy':<20} {np.mean(normalized_entropy):<8.3f} {np.std(normalized_entropy):<8.3f} {np.min(normalized_entropy):<8.3f} {np.max(normalized_entropy):<8.3f}\n"
+    stats_text += f"{'Difficulty':<20} {np.mean(difficulties):<8.3f} {np.std(difficulties):<8.3f} {np.min(difficulties):<8.3f} {np.max(difficulties):<8.3f}\n"
+    
+    axes[1, 2].text(0.1, 0.5, stats_text, transform=axes[1, 2].transAxes, 
+                   fontfamily='monospace', fontsize=9, verticalalignment='center')
+    axes[1, 2].set_title('Confidence Statistics')
+    axes[1, 2].axis('off')
+    
+    plt.tight_layout()
+    
+    # Convert to wandb Image
+    import wandb
+    wandb_image = wandb.Image(plt)
+    plt.close()
+    
+    return wandb_image
+
+
+def difficulty_analysis(difficulties, labels, dataset_name="IEMO"):
+    """Create comprehensive difficulty analysis plots using matplotlib"""
+    
+    # Convert to numpy
+    difficulties = np.array([d.cpu().numpy() if hasattr(d, 'cpu') else d for d in difficulties])
+    labels = np.array([l.cpu().numpy() if hasattr(l, 'cpu') else l for l in labels])
+    
+    plots = {}
     emotion_names = ["neutral", "happy", "sad", "anger"]
+    colors = ['blue', 'green', 'red', 'orange']
+    
+    # Create a comprehensive subplot figure
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle(f'Difficulty Analysis - {dataset_name}', fontsize=16, fontweight='bold')
+    
+    # Create consistent bin edges for all plots (5 bins from min to max)
+    bin_edges = np.linspace(difficulties.min(), difficulties.max(), 6)  # 6 edges for 5 bins
+    
+    # 1. Overall difficulty distribution
+    axes[0, 0].hist(difficulties, bins=bin_edges, alpha=0.7, color='skyblue', edgecolor='black')
+    axes[0, 0].set_title('Overall Difficulty Distribution')
+    axes[0, 0].set_xlabel('Difficulty')
+    axes[0, 0].set_ylabel('Count')
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # 2. Difficulty by emotion class (overlapping histograms)
     for emotion_class in range(4):
-        class_difficulties = [
-            diff
-            for i, diff in enumerate(new_difficulties)
-            if train_samples[i]["label"] == emotion_class
-        ]
-        if class_difficulties:
-            print(
-                f"   {emotion_names[emotion_class]}: mean={np.mean(class_difficulties):.3f}, n={len(class_difficulties)}"
-            )
+        class_mask = labels == emotion_class
+        class_difficulties = difficulties[class_mask]
+        if len(class_difficulties) > 0:
+            axes[0, 1].hist(class_difficulties, bins=bin_edges, alpha=0.6, 
+                          label=emotion_names[emotion_class], color=colors[emotion_class])
+    
+    axes[0, 1].set_title('Difficulty by Emotion Class')
+    axes[0, 1].set_xlabel('Difficulty')
+    axes[0, 1].set_ylabel('Count')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # 3. Box plot by emotion
+    emotion_diffs = []
+    emotion_labels_for_box = []
+    for emotion_class in range(4):
+        class_mask = labels == emotion_class
+        class_difficulties = difficulties[class_mask]
+        if len(class_difficulties) > 0:
+            emotion_diffs.append(class_difficulties)
+            emotion_labels_for_box.append(emotion_names[emotion_class])
+    
+    if emotion_diffs:
+        axes[0, 2].boxplot(emotion_diffs, labels=emotion_labels_for_box)
+        axes[0, 2].set_title('Difficulty Distribution by Emotion')
+        axes[0, 2].set_ylabel('Difficulty')
+        axes[0, 2].grid(True, alpha=0.3)
+    
+    # 4. Statistics table as text
+    stats_text = f"{'Emotion':<8} {'Count':<6} {'Mean':<6} {'Std':<6} {'Min':<6} {'Max':<6}\n"
+    stats_text += "-" * 50 + "\n"
+    
+    for emotion_class in range(4):
+        class_mask = labels == emotion_class
+        class_difficulties = difficulties[class_mask]
+        
+        if len(class_difficulties) > 0:
+            stats_text += f"{emotion_names[emotion_class]:<8} {len(class_difficulties):<6} "
+            stats_text += f"{np.mean(class_difficulties):<6.3f} {np.std(class_difficulties):<6.3f} "
+            stats_text += f"{np.min(class_difficulties):<6.3f} {np.max(class_difficulties):<6.3f}\n"
+    
+    axes[1, 0].text(0.1, 0.5, stats_text, transform=axes[1, 0].transAxes, 
+                   fontfamily='monospace', fontsize=10, verticalalignment='center')
+    axes[1, 0].set_title('Difficulty Statistics')
+    axes[1, 0].axis('off')
+    
+    # 5. Difficulty vs sample index (to see any patterns)
+    axes[1, 1].scatter(range(len(difficulties)), difficulties, alpha=0.6, s=10)
+    axes[1, 1].set_title('Difficulty vs Sample Index')
+    axes[1, 1].set_xlabel('Sample Index')
+    axes[1, 1].set_ylabel('Difficulty')
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    # 6. Difficulty percentiles
+    percentiles = [10, 25, 50, 75, 90]
+    percentile_values = [np.percentile(difficulties, p) for p in percentiles]
+    axes[1, 2].bar(range(len(percentiles)), percentile_values, 
+                   tick_label=[f'{p}%' for p in percentiles], color='lightcoral')
+    axes[1, 2].set_title('Difficulty Percentiles')
+    axes[1, 2].set_ylabel('Difficulty Value')
+    axes[1, 2].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Convert to wandb image
+    plots[f"difficulty_analysis/{dataset_name}_comprehensive_analysis"] = wandb.Image(fig)
+    plt.close(fig)
+    
+    return plots
 
 
 def create_data_loader(dataset, config, is_training=False):
     """Create data loader with optional curriculum learning and speaker disentanglement"""
 
     if is_training:
+        # Debug: Print config values
+        print(f"🔍 DEBUG: use_curriculum_learning = {config.use_curriculum_learning} (type: {type(config.use_curriculum_learning)})")
+        print(f"🔍 DEBUG: use_speaker_disentanglement = {config.use_speaker_disentanglement} (type: {type(config.use_speaker_disentanglement)})")
+        
         # Determine which sampler to use
         if config.use_curriculum_learning and config.use_speaker_disentanglement:
             # Combined curriculum + speaker disentanglement
