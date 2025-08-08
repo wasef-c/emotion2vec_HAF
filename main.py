@@ -710,7 +710,7 @@ def run_single_experiment(
         scheduler = None
         if config.lr_scheduler == "cosine":
             scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=config.num_epochs
+                optimizer, T_max=30 #config.num_epochs
             )
         elif config.lr_scheduler == "cosine_warmup":
             # Cosine annealing with warmup
@@ -1341,6 +1341,48 @@ def run_single_experiment(
     print(f"   {test_dataset_name} UAR: {final_cross_metrics['uar']:.4f}")
     print(f"   (Compare to LOSO avg: WA={final_results['cross_corpus_results']['accuracy']['mean']:.4f}, UAR={final_results['cross_corpus_results']['uar']['mean']:.4f})")
     
+    # Difficulty vs accuracy analysis for all-sessions cross-corpus test
+    print(f"\n🔍 Final All-Sessions Cross-Corpus Difficulty Analysis")
+    final_all_sessions_difficulty_plot = difficulty_plot(
+        final_cross_preds, final_cross_labels, final_cross_difficulties, 
+        f"Final-AllSessions-CrossCorpus-{test_dataset_name}"
+    )
+    final_all_sessions_difficulty_analysis = difficulty_analysis(
+        final_cross_difficulties, final_cross_labels, 
+        f"Final-AllSessions-CrossCorpus-{test_dataset_name}"
+    )
+    
+    # Confidence analysis for all-sessions cross-corpus test
+    final_all_sessions_confidence_plot = confidence_vs_difficulty_session_analysis(
+        final_cross_logits, final_cross_difficulties, final_cross_labels, final_cross_preds, 
+        f"Final-AllSessions-CrossCorpus-{test_dataset_name}"
+    )
+    
+    # Confusion matrix for all-sessions cross-corpus test
+    from sklearn.metrics import confusion_matrix
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    final_all_sessions_cm = confusion_matrix(final_cross_labels, final_cross_preds, labels=[0, 1, 2, 3])
+    
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(
+        final_all_sessions_cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=["Neutral", "Happy", "Sad", "Anger"],
+        yticklabels=["Neutral", "Happy", "Sad", "Anger"]
+    )
+    plt.title(f"Final All-Sessions Cross-Corpus Confusion Matrix ({test_dataset_name})\nWA: {final_cross_metrics['wa']:.4f}, UAR: {final_cross_metrics['uar']:.4f}")
+    plt.ylabel("True Label")
+    plt.xlabel("Predicted Label")
+    final_all_sessions_cm_img = wandb.Image(
+        plt,
+        caption=f"Final All-Sessions Cross-Corpus {test_dataset_name} - WA: {final_cross_metrics['wa']:.4f}, UAR: {final_cross_metrics['uar']:.4f}"
+    )
+    plt.close()
+    
     # Add to results
     final_results["all_sessions_cross_corpus"] = {
         "wa": final_cross_metrics['wa'],
@@ -1356,6 +1398,10 @@ def run_single_experiment(
         wandb.log({
             f"final_all_sessions/{test_dataset_name.lower()}_cross_wa": final_cross_metrics['wa'],
             f"final_all_sessions/{test_dataset_name.lower()}_cross_uar": final_cross_metrics['uar'],
+            f"final_all_sessions/confusion_matrix_Final-AllSessions-CrossCorpus-{test_dataset_name}": final_all_sessions_cm_img,
+            f"final_all_sessions/difficulty_plot_Final-AllSessions-CrossCorpus-{test_dataset_name}": final_all_sessions_difficulty_plot,
+            f"final_all_sessions/confidence_plot_Final-AllSessions-CrossCorpus-{test_dataset_name}": final_all_sessions_confidence_plot,
+            **{f"final_all_sessions/{k}": v for k, v in final_all_sessions_difficulty_analysis.items()},
         })
         wandb.summary[f"all_sessions_cross_{test_dataset_name.lower()}_wa"] = final_cross_metrics['wa']
         wandb.summary[f"all_sessions_cross_{test_dataset_name.lower()}_uar"] = final_cross_metrics['uar']

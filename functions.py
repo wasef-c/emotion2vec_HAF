@@ -932,8 +932,8 @@ class AdaptiveSaliencyLoss(nn.Module):
             focal_loss = self.focal_alpha * (1 - pt) ** self.focal_gamma * ce_loss
         else:
             # Difficulty-scaled focal loss
-            adaptive_gamma = self.focal_gamma * (1.0 + 0.5 * difficulties)
-            focal_loss = self.focal_alpha * (1 - pt) ** adaptive_gamma * ce_loss
+            adaptive_gamma = self.focal_gamma * (difficulties)
+            focal_loss = self.focal_alpha * (1 - pt) ** adaptive_gamma * ce_loss #+ difficulties
         return focal_loss.mean()
 
     def saliency_regularization(self, saliency_scores, epoch=None, total_epochs=None):
@@ -1121,12 +1121,12 @@ class EuclideanDistanceDifficulty(DifficultyCalculator):
         d_diff = d_act - d_exp
 
         # Simple Euclidean distance - no directional logic, just straight distance
-        v_penalty = abs(v_diff)
-        a_penalty = abs(a_diff) 
+        v_penalty = abs(v_diff)*1.5
+        a_penalty = abs(a_diff)*1.5
         d_penalty = abs(d_diff)
 
         distance = np.sqrt(v_penalty**2 + a_penalty**2 + d_penalty**2)
-        max_distance = 5 * np.sqrt(3)  # Normalize to [0, 1]
+        max_distance = np.sqrt(3)  # Normalize to [0, 1]
         return distance / max_distance
 
 
@@ -1804,10 +1804,10 @@ def apply_custom_difficulty(
                     print(f"      {class_names[class_id]}: mean={class_difficulties.mean():.3f}, std={class_difficulties.std():.3f}, n={len(class_difficulties)}")
         
         # Check how well distributed the values are across [0,1]
-        bins = np.linspace(0, 1, 11)  # 10 bins
+        bins = np.linspace(0, 1, 21)  # 20 bins
         hist, _ = np.histogram(norm_array, bins=bins)
         bin_percentages = hist / len(norm_array) * 100
-        print(f"    Distribution across 10 bins: {[f'{p:.1f}%' for p in bin_percentages]}")
+        print(f"    Distribution across 20 bins: {[f'{p:.1f}%' for p in bin_percentages]}")
         
         # Sample some values to see the distribution 
         sample_indices = np.linspace(0, len(difficulties_array)-1, 10, dtype=int)
@@ -1828,9 +1828,9 @@ def apply_custom_difficulty(
         print("⚠️  No difficulties calculated. Dataset may be empty.")
         return
 
-def difficulty_plot(test_preds,test_labels,all_difficulties,dataset_name="IEMO"):
-    # Configuration - increased to 10 bins for better granularity
-    num_bins = 10
+def difficulty_plot(test_preds,test_labels,all_difficulties,dataset_name="Dataset"):
+    # Configuration - 20 even buckets of same size for better granularity
+    num_bins = 20
 
     # Helper function to convert to numpy safely
     def to_numpy(x):
@@ -1851,11 +1851,10 @@ def difficulty_plot(test_preds,test_labels,all_difficulties,dataset_name="IEMO")
     all_difficulties = to_numpy(all_difficulties)
     # Calculate per-sample correctness
     correctness = (test_preds == test_labels)
-    difficulty_bins = np.linspace(
-        start=all_difficulties.min(),
-        stop=all_difficulties.max(),
-        num=num_bins + 1
-    )
+    
+    # Use quantile-based binning for equal sample sizes
+    difficulty_bins = np.percentile(all_difficulties, np.linspace(0, 100, num_bins + 1))
+    
     # Use np.digitize to assign each difficulty score to a bin index (1-based)
     bin_indices = np.digitize(all_difficulties, difficulty_bins)
     # Store the results for the plot
@@ -1902,7 +1901,7 @@ def difficulty_plot(test_preds,test_labels,all_difficulties,dataset_name="IEMO")
     return accuracy_plot
 
 
-def confidence_vs_difficulty_session_analysis(logits, difficulties, labels, predictions, dataset_name="IEMO"):
+def confidence_vs_difficulty_session_analysis(logits, difficulties, labels, predictions, dataset_name="Dataset"):
     """Create clean difficulty vs confidence analysis for per-session data (smaller, more interpretable)"""
     import numpy as np
     import matplotlib.pyplot as plt
@@ -1990,8 +1989,8 @@ def confidence_vs_difficulty_session_analysis(logits, difficulties, labels, pred
     print(f"  Difficulty vs Accuracy: r={acc_pearson_corr:.4f} (p={acc_pearson_p:.4f}), R²={accuracy_r2:.4f}")
     print(f"  Difficulty vs Entropy: r={entropy_pearson_corr:.4f} (p={entropy_pearson_p:.4f}), R²={entropy_r2:.4f}")
     
-    # Create finer bins for trend overlay (not main analysis)
-    n_trend_bins = 30
+    # Create finer bins for trend overlay (not main analysis)  
+    n_trend_bins = 40
     bin_edges = np.linspace(difficulties.min(), difficulties.max(), n_trend_bins + 1)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     bin_confidence_means = []
@@ -2131,7 +2130,7 @@ def confidence_vs_difficulty_session_analysis(logits, difficulties, labels, pred
     return wandb_image
 
 
-def confidence_vs_difficulty_analysis(logits, difficulties, labels, predictions, dataset_name="IEMO"):
+def confidence_vs_difficulty_analysis(logits, difficulties, labels, predictions, dataset_name="Dataset"):
     """Create difficulty vs confidence analysis plot using logits entropy and max probability"""
     import numpy as np
     import matplotlib.pyplot as plt
@@ -2245,7 +2244,7 @@ def confidence_vs_difficulty_analysis(logits, difficulties, labels, predictions,
     return wandb_image
 
 
-def difficulty_analysis(difficulties, labels, dataset_name="IEMO"):
+def difficulty_analysis(difficulties, labels, dataset_name="Dataset"):
     """Create comprehensive difficulty analysis plots using matplotlib"""
     
     # Convert to numpy

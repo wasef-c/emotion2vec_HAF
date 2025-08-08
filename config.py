@@ -19,7 +19,7 @@ class Config:
         self.num_epochs = 50
         self.learning_rate = 3e-4
         self.weight_decay = 1e-4
-        self.lr_scheduler = "cosine"  # Default to cosine (original behavior)
+        self.lr_scheduler = "step" #"none"  # Default to cosine (original behavior)
         
         # Class weights
         self.class_weights = {

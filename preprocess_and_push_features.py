@@ -87,10 +87,10 @@ def modify_dataset_with_emotion2vec(
 
 def main():
 
-    dataset = load_dataset("cairocode/MSPI_WAV_Diff_Curriculum")
+    dataset = load_dataset("cairocode/MSPP_WAV")
     emotion2vec_model = AutoModel(model="iic/emotion2vec_base")
     modified_dataset = modify_dataset_with_emotion2vec(dataset, emotion2vec_model)
-    modified_dataset.push_to_hub("MSPI_Emotion2Vec")
+    modified_dataset.push_to_hub("MSPP_Emotion2Vec")
 
 
 if __name__ == "__main__":
